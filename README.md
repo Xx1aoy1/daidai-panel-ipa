@@ -48,6 +48,8 @@
 | 系统版本 | iOS **15.0** 及以上（覆盖 TrollStore 常见机型） |
 | 架构 | arm64（真机），Mac 上可用模拟器跑但不作目标 |
 | 签名 | 仓库产出的 IPA **完全未签名**，仅用于 TrollStore / 自签工具（TrollStore、AltStore、Sideloadly 等） |
+| 账号角色 | `admin` / `operator` 全功能；`viewer` 自动收敛为只读（隐藏新建/运行/启停/编辑/删除，环境变量·订阅·脚本不开放，因为面板对这几类接口直接回 403） |
+| 多定时规则 | 面板把多条 cron 以**换行**存在 `cron_expression`，客户端按行原样读写，编辑不会压成一条 |
 
 > 面板默认是 HTTP（`http://IP:5700`）。`Info.plist` 已放开 ATS（`NSAllowsArbitraryLoads`），
 > 否则 iOS 会直接拦掉明文请求。这也是本客户端不能上架 App Store 的原因之一。
