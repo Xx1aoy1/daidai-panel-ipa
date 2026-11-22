@@ -35,6 +35,17 @@ extension APIClient {
         _ = try await send(path: "/auth/logout", method: "POST", canRefresh: false)
     }
 
+    /// 健康检查：不需要鉴权，用来判断「地址通不通」。
+    func healthCheck() async throws -> HealthStatus {
+        let data = try await send(path: "/health", authorized: false, canRefresh: false)
+        return try APIClient.decodeObject(data)
+    }
+
+    /// 带鉴权的探活：能拿到当前用户就说明令牌仍然有效。
+    func probeAuthorized() async throws -> PanelUser {
+        try await fetchCurrentUser()
+    }
+
     func panelVersion() async throws -> PanelVersion {
         let data = try await send(path: "/version", authorized: false, canRefresh: false)
         return try APIClient.decodeObject(data)

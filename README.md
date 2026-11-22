@@ -10,6 +10,17 @@
 
 ---
 
+## 零、直接下载（已构建好的 IPA）
+
+到 **[Releases](https://github.com/Xx1aoy1/daidai-panel-ipa/releases/latest)** 下载最新的
+`DaidaiPanel-iOS-<版本>-unsigned.ipa`，在「文件」里点它 → 「用 TrollStore 打开」→ Install 即可。
+
+- 不需要 Apple 开发者账号，不会 7 天掉签
+- 装好第一次启动：填面板地址（如 `http://192.168.0.100:5700`）→ 账号密码 →（开了 2FA 会多一个验证码框）
+- 连不上先看 **更多 → 面板信息 → 连接诊断**：`服务可达` 查地址与网络，`登录态有效` 查令牌
+
+---
+
 ## 一、它能做什么
 
 | 模块 | 能力 |
@@ -48,10 +59,10 @@
 ### 1. 用 GitHub Actions 出包（推荐，不需要 Mac）
 
 1. 把本仓库推到 GitHub（或 fork）。
-2. 打开 **Actions → Build unsigned IPA → Run workflow**。
-3. 跑完在 **Artifacts** 里下载 `DaidaiPanel-iOS-ipa`，解压得到 `DaidaiPanel-iOS-1.0.0-unsigned.ipa`。
+2. 打开 **Actions → Build unsigned IPA → Run workflow**（runner 用 `macos-latest`；`macos-14` 已被 GitHub 下线，会秒取消）。
+3. 跑完在 **Artifacts** 里下载 `DaidaiPanel-iOS-ipa`，解压得到 `DaidaiPanel-iOS-<版本>-unsigned.ipa`。
 4. 把 IPA 传到手机（AirDrop / 文件 App / 局域网），用 **TrollStore** 打开 → Install。
-5. 打 tag（`v1.0.0`）推送时，工作流还会自动把 IPA 挂到 Release 上。
+5. 打 tag（`v1.1.0`）推送时，工作流会自动建 Release 并把 IPA 挂上去；工作流已声明 `contents: write` 权限。
 
 ### 2. 本地构建（需要 macOS + Xcode）
 
