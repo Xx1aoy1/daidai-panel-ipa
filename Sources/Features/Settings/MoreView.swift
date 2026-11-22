@@ -172,7 +172,7 @@ struct PanelInfoView: View {
                 KeyValueRow(label: "账号", value: session.currentServer?.username ?? "—")
             }
 
-            Section(header: Text("连接诊断")) {
+            Section {
                 DiagnosticRow(title: "服务可达",
                               state: healthOK,
                               detail: healthText)
@@ -193,6 +193,8 @@ struct PanelInfoView: View {
                     .font(.system(size: 13, weight: .medium))
                 }
                 .disabled(checking)
+            } header: {
+                Text("连接诊断")
             } footer: {
                 Text("「服务可达」只探 /api/v1/health，不需要登录；「登录态有效」会用当前令牌读一次用户信息。局域网地址请确认手机与面板在同一网段，并允许了「本地网络」权限。")
                     .font(.system(size: 11))
