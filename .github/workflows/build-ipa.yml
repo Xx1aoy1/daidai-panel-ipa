@@ -9,10 +9,29 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 轻量自检：先确认仓库内容与 Actions 本身可用，再排进昂贵的 macOS 队列。
+  preflight:
+    name: Preflight (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Repository sanity check
+        run: |
+          set -euo pipefail
+          echo "runner: $(uname -a)"
+          test -f project.yml || { echo "::error::缺少 project.yml"; exit 1; }
+          test -f Sources/Resources/Info.plist || { echo "::error::缺少 Info.plist"; exit 1; }
+          echo "swift files: $(find Sources -name '*.swift' | wc -l)"
+          echo "preflight ok"
+
   build:
     name: Build DaidaiPanel-iOS
+    needs: preflight
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -22,6 +41,7 @@ jobs:
         run: |
           xcodebuild -version
           sw_vers
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -43,7 +63,16 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee -a build.log | tail -n 200
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Package unsigned IPA
         id: package
