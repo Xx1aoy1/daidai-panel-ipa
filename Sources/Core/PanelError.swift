@@ -22,7 +22,14 @@ enum PanelError: LocalizedError, Equatable {
             return message ?? "登录已失效，请重新登录"
         case .sessionExpired:
             return "登录已失效，请重新登录"
-        case .server(_, let message, _):
+        case .server(let status, let message, _):
+            // 面板对 viewer 的写操作统一回 403 + {"error":"权限不足"}，直接展示会让人以为是 bug。
+            if status == 403, message.isEmpty || message == "权限不足" {
+                return "权限不足：当前账号没有执行该操作的权限（viewer 为只读角色）"
+            }
+            if status == 404, message.isEmpty {
+                return "接口不存在，面板版本可能不匹配"
+            }
             return message
         case .decoding(let detail):
             return "数据解析失败：\(detail)"

@@ -7,6 +7,9 @@ struct PanelTask: Decodable, Identifiable, Equatable {
     var name: String?
     var command: String?
     var cronExpression: String?
+    /// 面板把多条定时规则以换行存进 `cron_expression`，同时单独给出解析后的数组。
+    /// 编辑时必须按数组还原成多行，否则保存会把多余的规则冲掉。
+    var cronExpressions: [String]?
     var taskType: String?
     var status: Double?
     var enabled: Bool?
@@ -50,9 +53,32 @@ struct PanelTask: Decodable, Identifiable, Equatable {
         return statusValue != 0
     }
 
+    /// 拆成一条条规则：优先用面板给好的数组，退化为按换行切分。
+    var cronLines: [String] {
+        if let cronExpressions, !cronExpressions.isEmpty {
+            return cronExpressions
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }
+        let raw = cronExpression ?? ""
+        return raw
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    var hasMultipleCrons: Bool { cronLines.count > 1 }
+
+    /// 列表里一行展示用：多条时用「 · 」连起来。
     var cronText: String {
-        let cron = (cronExpression ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return cron.isEmpty ? "未设置" : cron
+        let lines = cronLines
+        guard !lines.isEmpty else { return "未设置" }
+        return lines.joined(separator: " · ")
+    }
+
+    /// 编辑器里的原始文本：一条一行，提交时原样发回面板。
+    var cronEditorText: String {
+        cronLines.joined(separator: "\n")
     }
 
     var isManualTask: Bool { (taskType ?? "cron") == "manual" }
@@ -95,7 +121,9 @@ struct TaskDraft {
     init(task: PanelTask) {
         name = task.name ?? ""
         command = task.command ?? ""
-        cronExpression = task.cronExpression ?? "0 0 * * *"
+        // 用多行原样回填，保证「一个任务多条触发规则」编辑后不被压成一条。
+        let existing = task.cronEditorText
+        cronExpression = existing.isEmpty ? "0 0 * * *" : existing
         taskType = task.taskType ?? "cron"
         timeout = task.timeout ?? 0
         maxRetries = task.maxRetries ?? 0
@@ -106,11 +134,24 @@ struct TaskDraft {
         allowMultipleInstances = task.allowMultipleInstances ?? false
     }
 
+    /// 面板侧 `NormalizeExpressions` 的口径：按行拆分、去空白、丢掉空行、再用换行拼回去。
+    var normalizedCron: String {
+        cronExpression
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    var cronLines: [String] {
+        normalizedCron.isEmpty ? [] : normalizedCron.components(separatedBy: "\n")
+    }
+
     var json: [String: Any] {
         [
             "name": name.trimmingCharacters(in: .whitespacesAndNewlines),
             "command": command.trimmingCharacters(in: .whitespacesAndNewlines),
-            "cron_expression": cronExpression.trimmingCharacters(in: .whitespacesAndNewlines),
+            "cron_expression": normalizedCron,
             "task_type": taskType,
             "timeout": timeout,
             "max_retries": maxRetries,
@@ -125,7 +166,7 @@ struct TaskDraft {
     var validationError: String? {
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "任务名称不能为空" }
         if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "执行命令不能为空" }
-        if taskType == "cron" && cronExpression.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if taskType == "cron" && cronLines.isEmpty {
             return "定时任务需要填写 Cron 表达式"
         }
         return nil

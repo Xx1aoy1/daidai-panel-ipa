@@ -48,7 +48,7 @@ struct TaskEditView: View {
                     }
                 }
 
-                Section(header: Text("调度")) {
+                Section {
                     Picker("任务类型", selection: $draft.taskType) {
                         Text("Cron 定时").tag("cron")
                         Text("手动触发").tag("manual")
@@ -56,12 +56,20 @@ struct TaskEditView: View {
                     .pickerStyle(.segmented)
 
                     if draft.taskType == "cron" {
-                        HStack {
-                            Text("Cron")
-                            Spacer()
-                            TextField("0 0 * * *", text: $draft.cronExpression)
-                                .multilineTextAlignment(.trailing)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Cron 表达式")
+                                    .font(.system(size: 13))
+                                Spacer()
+                                Text(draft.cronLines.count > 1
+                                     ? "\(draft.cronLines.count) 条规则"
+                                     : "一条规则")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            TextEditor(text: $draft.cronExpression)
                                 .font(.system(size: 14, design: .monospaced))
+                                .frame(minHeight: 58)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled(true)
                         }
@@ -69,13 +77,13 @@ struct TaskEditView: View {
                         Menu {
                             ForEach(CronPreset.allCases) { preset in
                                 Button("\(preset.rawValue)  (\(preset.expression))") {
-                                    draft.cronExpression = preset.expression
+                                    appendCron(preset.expression)
                                 }
                             }
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "wand.and.stars")
-                                Text("使用常用模板")
+                                Text("追加一条常用规则")
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 10))
@@ -83,6 +91,11 @@ struct TaskEditView: View {
                             .font(.system(size: 13))
                         }
                     }
+                } header: {
+                    Text("调度")
+                } footer: {
+                    Text("面板支持一个任务挂多条定时规则，**每行一条**。客户端会按行原样提交，不会把多余的规则覆盖掉。")
+                        .font(.system(size: 11))
                 }
 
                 Section(header: Text("执行控制"),
@@ -128,6 +141,16 @@ struct TaskEditView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    private func appendCron(_ expression: String) {
+        var lines = draft.cronLines
+        // 第一条如果是默认占位或空，直接替换掉，别让用户先手动删。
+        if lines.count == 1, lines[0].isEmpty {
+            lines = []
+        }
+        lines.append(expression)
+        draft.cronExpression = lines.joined(separator: "\n")
     }
 
     private func save() {
