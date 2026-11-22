@@ -1,0 +1,85 @@
+name: Build unsigned IPA
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build DaidaiPanel-iOS
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          sw_vers
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Build (no code signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project DaidaiPanel.xcodeproj \
+            -scheme DaidaiPanel \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION="${MARKETING_VERSION:-1.0.0}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        id: package
+        run: |
+          set -euo pipefail
+          APP_PATH="build/Build/Products/Release-iphoneos/DaidaiPanel.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::找不到构建产物 $APP_PATH"
+            ls -R build/Build/Products || true
+            exit 1
+          fi
+
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Info.plist")
+          IPA_NAME="DaidaiPanel-iOS-${VERSION}-unsigned.ipa"
+
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry "$IPA_NAME" Payload
+          rm -rf Payload
+
+          echo "ipa_name=${IPA_NAME}" >> "$GITHUB_OUTPUT"
+          echo "构建完成：${IPA_NAME}（$(du -h "$IPA_NAME" | cut -f1)）"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DaidaiPanel-iOS-ipa
+          path: ${{ steps.package.outputs.ipa_name }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach IPA to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.ipa_name }}
+          draft: false
+          generate_release_notes: true

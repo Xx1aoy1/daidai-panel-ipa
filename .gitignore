@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# XcodeGen 生成物（不提交，CI 现生成）
+*.xcodeproj
+*.xcworkspace
+build/
+DerivedData/
+
+# 构建产物
+*.ipa
+Payload/
+*.dSYM
+*.xcarchive
+
+# Swift Package Manager（本项目无依赖，留作兜底）
+.build/
+.swiftpm/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
