@@ -34,3 +34,9 @@ struct PagedResult<T> {
 }
 
 struct EmptyResponse: Decodable {}
+
+/// `GET /api/v1/health` 的返回：`{"status":"ok"}`。
+struct HealthStatus: Decodable {
+    let status: String?
+    var isOK: Bool { (status ?? "").lowercased() == "ok" }
+}

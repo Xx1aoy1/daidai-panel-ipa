@@ -156,6 +156,12 @@ struct PanelInfoView: View {
     @State private var errorText: String?
     @State private var isLoading = true
 
+    @State private var healthOK: Bool?
+    @State private var healthText = "未检测"
+    @State private var authOK: Bool?
+    @State private var authText = "未检测"
+    @State private var checking = false
+
     var body: some View {
         List {
             Section(header: Text("连接")) {
@@ -164,6 +170,32 @@ struct PanelInfoView: View {
                 KeyValueRow(label: "地址", value: session.currentServer?.baseURL ?? "—", monospaced: true)
                 Divider()
                 KeyValueRow(label: "账号", value: session.currentServer?.username ?? "—")
+            }
+
+            Section(header: Text("连接诊断")) {
+                DiagnosticRow(title: "服务可达",
+                              state: healthOK,
+                              detail: healthText)
+                Divider()
+                DiagnosticRow(title: "登录态有效",
+                              state: authOK,
+                              detail: authText)
+                Divider()
+                Button {
+                    Task { await runDiagnostics() }
+                } label: {
+                    HStack {
+                        Image(systemName: "stethoscope")
+                        Text(checking ? "检测中…" : "重新检测")
+                        Spacer()
+                        if checking { ProgressView() }
+                    }
+                    .font(.system(size: 13, weight: .medium))
+                }
+                .disabled(checking)
+            } footer: {
+                Text("「服务可达」只探 /api/v1/health，不需要登录；「登录态有效」会用当前令牌读一次用户信息。局域网地址请确认手机与面板在同一网段，并允许了「本地网络」权限。")
+                    .font(.system(size: 11))
             }
 
             Section(header: Text("面板")) {
@@ -205,11 +237,77 @@ struct PanelInfoView: View {
             errorText = (error as? PanelError)?.message ?? error.localizedDescription
         }
         isLoading = false
+        await runDiagnostics()
+    }
+
+    private func runDiagnostics() async {
+        guard let client = session.client else { return }
+        checking = true
+
+        do {
+            let health = try await client.healthCheck()
+            healthOK = health.isOK
+            healthText = health.isOK ? "正常（HTTP 200）" : "异常（status=\(health.status ?? "空")）"
+        } catch {
+            healthOK = false
+            healthText = (error as? PanelError)?.message ?? error.localizedDescription
+        }
+
+        do {
+            let user = try await client.probeAuthorized()
+            authOK = true
+            authText = "有效（\(user.displayName)）"
+        } catch {
+            authOK = false
+            authText = (error as? PanelError)?.message ?? error.localizedDescription
+        }
+
+        checking = false
+    }
+}
+
+private struct DiagnosticRow: View {
+    let title: String
+    let state: Bool?
+    let detail: String
+
+    private var symbol: String {
+        switch state {
+        case .some(true): return "checkmark.circle.fill"
+        case .some(false): return "xmark.octagon.fill"
+        case .none: return "circle.dashed"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .some(true): return AppTheme.success
+        case .some(false): return AppTheme.failure
+        case .none: return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: symbol)
+                .foregroundColor(tint)
+                .font(.system(size: 14))
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                Text(detail)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 1)
     }
 }
 
 struct AboutView: View {
-    private let repoURL = "https://github.com/Xx1aoy1/DaidaiPanel-iOS"
+    private let repoURL = "https://github.com/Xx1aoy1/daidai-panel-ipa"
     private let panelURL = "https://github.com/linzixuanzz/daidai-panel"
 
     var body: some View {

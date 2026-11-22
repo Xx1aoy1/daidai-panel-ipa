@@ -8,6 +8,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   # 轻量自检：先确认仓库内容与 Actions 本身可用，再排进昂贵的 macOS 队列。
   preflight:
