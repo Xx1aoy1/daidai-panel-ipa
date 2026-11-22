@@ -8,15 +8,28 @@ struct MoreView: View {
     var body: some View {
         NavigationView {
             List {
-                Section(header: Text("面板数据")) {
-                    NavigationLink(destination: EnvListView()) {
-                        Label("环境变量", systemImage: "key.fill")
+                Section {
+                    if session.canWrite {
+                        NavigationLink(destination: EnvListView()) {
+                            Label("环境变量", systemImage: "key.fill")
+                        }
+                        NavigationLink(destination: SubscriptionListView()) {
+                            Label("订阅管理", systemImage: "arrow.triangle.2.circlepath")
+                        }
+                        NavigationLink(destination: ScriptBrowserView()) {
+                            Label("脚本文件", systemImage: "folder.fill")
+                        }
+                    } else {
+                        lockRow("环境变量", icon: "key.fill")
+                        lockRow("订阅管理", icon: "arrow.triangle.2.circlepath")
+                        lockRow("脚本文件", icon: "folder.fill")
                     }
-                    NavigationLink(destination: SubscriptionListView()) {
-                        Label("订阅管理", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    NavigationLink(destination: ScriptBrowserView()) {
-                        Label("脚本文件", systemImage: "folder.fill")
+                } header: {
+                    Text("面板数据")
+                } footer: {
+                    if !session.canWrite {
+                        Text("当前账号角色为 viewer（只读），面板对这几类接口返回 403，所以这里不开放入口。用 admin / operator 账号登录即可看到。")
+                            .font(.system(size: 11))
                     }
                 }
 
@@ -88,6 +101,24 @@ struct MoreView: View {
             }
         }
         .navigationViewStyle(.stack)
+    }
+
+    /// 只读账号的占位行：不给导航，避免点进去吃一个 403。
+    private func lockRow(_ title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(.secondary)
+                .frame(width: 22)
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text("只读")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Image(systemName: "lock.fill")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
     }
 }
 

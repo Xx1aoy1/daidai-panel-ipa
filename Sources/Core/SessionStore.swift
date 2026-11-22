@@ -49,6 +49,11 @@ final class SessionStore: ObservableObject {
     @Published private(set) var isRestoring = true
     @Published var sessionMessage: String?
 
+    /// 当前账号是否允许写操作；viewer 只读，界面上对应的按钮直接不显示。
+    var canWrite: Bool { user?.canWrite ?? true }
+
+    var isViewer: Bool { user?.isViewer ?? false }
+
     private let serversKey = "daidai.servers"
     private let currentKey = "daidai.currentServerID"
 

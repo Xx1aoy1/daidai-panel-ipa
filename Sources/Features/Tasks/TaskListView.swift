@@ -88,10 +88,12 @@ struct TaskListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showCreate = true
-                    } label: {
-                        Image(systemName: "plus")
+                    if session.canWrite {
+                        Button {
+                            showCreate = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
                     }
                 }
             }
@@ -122,13 +124,24 @@ struct TaskListView: View {
     // MARK: - 子视图
 
     private var filterBar: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 6) {
             Picker("筛选", selection: $model.filter) {
                 ForEach(TaskFilter.allCases) { item in
                     Text(item.rawValue).tag(item)
                 }
             }
             .pickerStyle(.segmented)
+
+            if session.isViewer {
+                HStack(spacing: 4) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 10))
+                    Text("当前账号只读（viewer），不能运行或修改任务")
+                        .font(.system(size: 11))
+                    Spacer()
+                }
+                .foregroundColor(.secondary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -153,7 +166,9 @@ struct TaskListView: View {
         } else if model.tasks.isEmpty {
             EmptyStateView(icon: "tray",
                            title: "没有符合条件的任务",
-                           message: "换个筛选条件，或点右上角 + 新建任务")
+                           message: session.canWrite
+                                ? "换个筛选条件，或点右上角 + 新建任务"
+                                : "换个筛选条件试试（当前账号只读）")
             Spacer()
         } else {
             List {
@@ -165,38 +180,42 @@ struct TaskListView: View {
                             TaskRow(task: task)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                pendingDelete = task
-                            } label: {
-                                Label("删除", systemImage: "trash")
-                            }
+                            if session.canWrite {
+                                Button(role: .destructive) {
+                                    pendingDelete = task
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
 
-                            if task.runState == .running {
-                                Button {
-                                    perform { client in try await client.stopTask(id: task.id) }
-                                } label: {
-                                    Label("停止", systemImage: "stop.fill")
+                                if task.runState == .running {
+                                    Button {
+                                        perform { client in try await client.stopTask(id: task.id) }
+                                    } label: {
+                                        Label("停止", systemImage: "stop.fill")
+                                    }
+                                    .tint(AppTheme.failure)
+                                } else {
+                                    Button {
+                                        perform { client in try await client.runTask(id: task.id) }
+                                    } label: {
+                                        Label("运行", systemImage: "play.fill")
+                                    }
+                                    .tint(AppTheme.accent)
                                 }
-                                .tint(AppTheme.failure)
-                            } else {
-                                Button {
-                                    perform { client in try await client.runTask(id: task.id) }
-                                } label: {
-                                    Label("运行", systemImage: "play.fill")
-                                }
-                                .tint(AppTheme.accent)
                             }
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                perform { client in
-                                    try await client.setTaskEnabled(id: task.id, enabled: !task.isEnabled)
+                            if session.canWrite {
+                                Button {
+                                    perform { client in
+                                        try await client.setTaskEnabled(id: task.id, enabled: !task.isEnabled)
+                                    }
+                                } label: {
+                                    Label(task.isEnabled ? "禁用" : "启用",
+                                          systemImage: task.isEnabled ? "pause.circle" : "play.circle")
                                 }
-                            } label: {
-                                Label(task.isEnabled ? "禁用" : "启用",
-                                      systemImage: task.isEnabled ? "pause.circle" : "play.circle")
+                                .tint(task.isEnabled ? AppTheme.warning : AppTheme.success)
                             }
-                            .tint(task.isEnabled ? AppTheme.warning : AppTheme.success)
                         }
                         .onAppear {
                             if task.id == model.tasks.last?.id {

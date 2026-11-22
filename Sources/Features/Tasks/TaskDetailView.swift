@@ -40,20 +40,22 @@ struct TaskDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button {
-                        showEdit = true
+                if session.canWrite {
+                    Menu {
+                        Button {
+                            showEdit = true
+                        } label: {
+                            Label("编辑任务", systemImage: "square.and.pencil")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label("删除任务", systemImage: "trash")
+                        }
                     } label: {
-                        Label("编辑任务", systemImage: "square.and.pencil")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    Divider()
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("删除任务", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
                 }
             }
         }
@@ -124,22 +126,24 @@ struct TaskDetailView: View {
 
     private var actionCard: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                if task.runState == .running {
-                    actionButton(title: "停止运行", icon: "stop.fill", color: AppTheme.failure) {
-                        run { client in try await client.stopTask(id: task.id) }
+            if session.canWrite {
+                HStack(spacing: 10) {
+                    if task.runState == .running {
+                        actionButton(title: "停止运行", icon: "stop.fill", color: AppTheme.failure) {
+                            run { client in try await client.stopTask(id: task.id) }
+                        }
+                    } else {
+                        actionButton(title: "立即运行", icon: "play.fill", color: AppTheme.accent) {
+                            run { client in try await client.runTask(id: task.id) }
+                        }
                     }
-                } else {
-                    actionButton(title: "立即运行", icon: "play.fill", color: AppTheme.accent) {
-                        run { client in try await client.runTask(id: task.id) }
-                    }
-                }
 
-                actionButton(title: task.isEnabled ? "禁用" : "启用",
-                             icon: task.isEnabled ? "pause.fill" : "checkmark.circle.fill",
-                             color: task.isEnabled ? AppTheme.warning : AppTheme.success) {
-                    run { client in
-                        try await client.setTaskEnabled(id: task.id, enabled: !task.isEnabled)
+                    actionButton(title: task.isEnabled ? "禁用" : "启用",
+                                 icon: task.isEnabled ? "pause.fill" : "checkmark.circle.fill",
+                                 color: task.isEnabled ? AppTheme.warning : AppTheme.success) {
+                        run { client in
+                            try await client.setTaskEnabled(id: task.id, enabled: !task.isEnabled)
+                        }
                     }
                 }
             }
@@ -150,8 +154,10 @@ struct TaskDetailView: View {
                 }
                 .buttonStyle(.plain)
 
-                actionButton(title: "编辑", icon: "square.and.pencil", color: AppTheme.idle) {
-                    showEdit = true
+                if session.canWrite {
+                    actionButton(title: "编辑", icon: "square.and.pencil", color: AppTheme.idle) {
+                        showEdit = true
+                    }
                 }
             }
         }
@@ -277,7 +283,13 @@ struct TaskDetailView: View {
         do {
             latestLog = try await client.fetchLatestLog(taskId: task.id)
         } catch let error as PanelError {
-            logHint = error.message
+            // 面板对「还没跑过」的任务回 404 + {"error":"该任务还没有日志记录"}，这不是错误，是空态。
+            if case .server(let status, _, _) = error, status == 404 {
+                latestLog = nil
+                logHint = "该任务还没有执行记录"
+            } else {
+                logHint = error.message
+            }
         } catch {
             logHint = error.localizedDescription
         }
