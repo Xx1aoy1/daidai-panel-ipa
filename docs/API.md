@@ -89,7 +89,7 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 
 | 方法 | 路径 | 请求体 | 备注 |
 | --- | --- | --- | --- |
-| GET | `/envs` | — | `page_size=500` 一次拉全，客户端本地筛选 |
+| GET | `/envs` | — | 按 `page_size=100` 翻页拉全，客户端本地筛选（**`page_size>100` 会被面板降级成 20**） |
 | POST | `/envs` | `{name, value, remarks, group, enabled}` | |
 | PUT | `/envs/:id` | 同上 | |
 | DELETE | `/envs/:id` | — | |
@@ -99,7 +99,7 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 
 | 方法 | 路径 | 备注 |
 | --- | --- | --- |
-| GET | `/subscriptions` | 分页，客户端 `page_size=200` |
+| GET | `/subscriptions` | 分页，客户端按 `page_size=100` 翻页 |
 | PUT | `/subscriptions/:id/pull` | 触发一次同步 |
 | PUT | `/subscriptions/:id/enable` \| `/disable` | |
 | GET | `/subscriptions/:id/logs` | 拉取日志（客户端暂未使用） |
@@ -132,3 +132,4 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 - viewer 访问 `/envs`、`/subscriptions`、`/scripts/tree` 及所有写操作 → `403 权限不足`；
   `/notifications`、`/configs` 对 operator 也是 `403 需要管理员权限`。
 - `POST /auth/refresh` 只回 `access_token`，**不轮换** refresh token。
+- **分页陷阱**：`page_size` 超过 100 时面板不报错，而是**静默降级成 20**（实测 `/envs?page_size=500` 只回 20 条、89 个变量只看到 20 个）。客户端因此统一用 100 一页翻到底。
