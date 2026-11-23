@@ -11,6 +11,8 @@ struct LogDetailView: View {
     @State private var isLoading = true
     @State private var errorText: String?
     @State private var copiedHint = false
+    @State private var isDownloading = false
+    @State private var shareFile: ShareFile?
 
     var body: some View {
         Group {
@@ -49,8 +51,21 @@ struct LogDetailView: View {
                     } label: {
                         Image(systemName: copiedHint ? "checkmark" : "doc.on.doc")
                     }
+                    Button {
+                        Task { await downloadRaw() }
+                    } label: {
+                        if isDownloading {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "arrow.down.doc")
+                        }
+                    }
+                    .disabled(isDownloading || isLoading)
                 }
             }
+        }
+        .sheet(item: $shareFile) { file in
+            ShareSheet(items: [file.url])
         }
         .task { await load() }
     }
@@ -131,5 +146,22 @@ struct LogDetailView: View {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             copiedHint = false
         }
+    }
+
+    /// 面板的原始日志文件落在磁盘上，直连下载不能带 Authorization，
+    /// 所以先换一张 120 秒的一次性票据，再按票据里的 url 下载。
+    private func downloadRaw() async {
+        guard let client = session.client else { return }
+        isDownloading = true
+        errorText = nil
+        do {
+            let url = try await client.downloadRawLog(id: logID)
+            shareFile = ShareFile(url: url)
+        } catch {
+            if !session.handle(error) {
+                errorText = (error as? PanelError)?.message ?? error.localizedDescription
+            }
+        }
+        isDownloading = false
     }
 }

@@ -69,4 +69,12 @@ enum DateText {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter.string(from: date)
     }
+
+    /// 只要时分秒，用于「更新于 12:34:56」这类实时刷新的脚注。
+    static func clock(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter.string(from: date)
+    }
 }

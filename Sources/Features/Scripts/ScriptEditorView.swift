@@ -13,11 +13,13 @@ struct ScriptEditorView: View {
     @State private var isBinary = false
     @State private var errorText: String?
     @State private var toast: String?
+    @State private var isFormatting = false
     @State private var runRequest: RunRequest?
     @State private var showVersions = false
 
     private var isDirty: Bool { content != original }
     private var canRun: Bool { !isBinary && !isLoading && ScriptLanguage.canRun(path: path) }
+    private var canFormat: Bool { !isBinary && !isLoading && ScriptLanguage.formatterLanguage(path: path) != nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,28 +53,38 @@ struct ScriptEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if canRun {
+                if canRun || canFormat {
                     Menu {
-                        Button {
-                            runInline()
-                        } label: {
-                            Label(isDirty ? "运行当前内容（未保存）" : "运行", systemImage: "play.fill")
-                        }
-                        if isDirty {
+                        if canRun {
                             Button {
-                                runSaved()
+                                runInline()
                             } label: {
-                                Label("运行已保存的版本", systemImage: "clock.arrow.circlepath")
+                                Label(isDirty ? "运行当前内容（未保存）" : "运行", systemImage: "play.fill")
                             }
+                            if isDirty {
+                                Button {
+                                    runSaved()
+                                } label: {
+                                    Label("运行已保存的版本", systemImage: "clock.arrow.circlepath")
+                                }
+                            }
+                            Divider()
                         }
-                        Divider()
+                        if canFormat {
+                            Button {
+                                formatCode()
+                            } label: {
+                                Label(isFormatting ? "格式化中…" : "格式化代码", systemImage: "wand.and.stars")
+                            }
+                            .disabled(isFormatting)
+                        }
                         Button {
                             showVersions = true
                         } label: {
                             Label("历史版本", systemImage: "list.bullet.rectangle")
                         }
                     } label: {
-                        Image(systemName: "play.circle")
+                        Image(systemName: "ellipsis.circle")
                     }
                 }
 
@@ -161,6 +173,33 @@ struct ScriptEditorView: View {
 
     private func runSaved() {
         runRequest = RunRequest(title: "运行已保存版本", source: .saved(path: path))
+    }
+
+    /// 面板侧调用 black / shfmt / gofmt 处理，没装工具时原样返回 `formatter: "none"`。
+    /// 格式化结果只改编辑器里的内容（会变成「未保存」状态），要落盘还是得按保存。
+    private func formatCode() {
+        guard let client = session.client,
+              let language = ScriptLanguage.formatterLanguage(path: path) else { return }
+        isFormatting = true
+        errorText = nil
+        let snapshot = content
+
+        Task {
+            do {
+                let result = try await client.formatScript(content: snapshot, language: language)
+                if let formatted = result.content, formatted != snapshot {
+                    content = formatted
+                    flash(result.didFormat ? "已用 \(result.formatter ?? "") 格式化，记得保存" : "内容未变化")
+                } else {
+                    flash(result.didFormat ? "已经是格式化后的样子" : "面板没装 \(language) 格式化器")
+                }
+            } catch {
+                if !session.handle(error) {
+                    errorText = (error as? PanelError)?.message ?? error.localizedDescription
+                }
+            }
+            isFormatting = false
+        }
     }
 
     private func flash(_ text: String) {

@@ -27,6 +27,7 @@ final class LogListViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isLoadingMore = false
     @Published var errorText: String?
+    @Published var toast: String?
     @Published var total = 0
 
     private var page = 1
@@ -69,11 +70,43 @@ final class LogListViewModel: ObservableObject {
         }
         isLoadingMore = false
     }
+
+    /// 单条删除（`DELETE /logs/:id`）。面板会同时删记录和磁盘上的日志文件。
+    func delete(_ log: TaskLog, client: APIClient) async {
+        do {
+            try await client.deleteLog(id: log.id)
+            logs.removeAll { $0.id == log.id }
+            total = max(total - 1, 0)
+            flash("已删除 1 条日志")
+        } catch {
+            errorText = (error as? PanelError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// 清理 N 天前的日志（`DELETE /logs/clean?days=N`），记录与文件一起删。
+    func clean(days: Int, client: APIClient) async {
+        do {
+            let message = try await client.cleanLogs(days: days)
+            flash(message ?? "已清理 \(days) 天前的日志")
+            await reload(client: client)
+        } catch {
+            errorText = (error as? PanelError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func flash(_ text: String) {
+        withAnimation { toast = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            withAnimation { toast = nil }
+        }
+    }
 }
 
 struct LogListView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var model = LogListViewModel()
+    @State private var showCleanDialog = false
 
     var body: some View {
         NavigationView {
@@ -97,12 +130,21 @@ struct LogListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        Task { await reload() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 14) {
+                        if session.canWrite {
+                            Button {
+                                showCleanDialog = true
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                        }
+                        Button {
+                            Task { await reload() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(model.isLoading)
                     }
-                    .disabled(model.isLoading)
                 }
             }
             .searchable(text: $model.keyword, prompt: "按任务名搜索日志")
@@ -112,6 +154,26 @@ struct LogListView: View {
         }
         .navigationViewStyle(.stack)
         .task { await reload() }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                Text(toast)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.black.opacity(0.78))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 28)
+            }
+        }
+        .confirmationDialog("清理会同时删除日志记录和磁盘上的日志文件，删掉就找不回来了。",
+                            isPresented: $showCleanDialog,
+                            titleVisibility: .visible) {
+            Button("清理 7 天前") { Task { await clean(days: 7) } }
+            Button("清理 30 天前") { Task { await clean(days: 30) } }
+            Button("清理 90 天前") { Task { await clean(days: 90) } }
+            Button("取消", role: .cancel) {}
+        }
     }
 
     @ViewBuilder
@@ -137,6 +199,15 @@ struct LogListView: View {
                 ForEach(model.logs) { log in
                     NavigationLink(destination: LogDetailView(logID: log.id, title: log.titleText)) {
                         LogRow(log: log)
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        if session.canWrite {
+                            Button(role: .destructive) {
+                                Task { await deleteLog(log) }
+                            } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
                     }
                     .onAppear {
                         if log.id == model.logs.last?.id {
@@ -172,6 +243,16 @@ struct LogListView: View {
     private func loadMore() async {
         guard let client = session.client else { return }
         await model.loadMore(client: client)
+    }
+
+    private func deleteLog(_ log: TaskLog) async {
+        guard let client = session.client else { return }
+        await model.delete(log, client: client)
+    }
+
+    private func clean(days: Int) async {
+        guard let client = session.client else { return }
+        await model.clean(days: days, client: client)
     }
 }
 
