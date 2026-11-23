@@ -126,8 +126,9 @@ extension APIClient {
     // MARK: - 环境变量
 
     func fetchEnvs() async throws -> [EnvVar] {
-        let result: PagedResult<EnvVar> = try await list("/envs", query: ["page": "1", "page_size": "500"])
-        return result.items
+        // 面板把大于 100 的 page_size 直接降级成 20（实测 500 → 20），
+        // 所以这里固定 100 并翻页拉全，否则变量多时只能看到前 20 个。
+        try await fetchAll("/envs")
     }
 
     func createEnv(_ draft: EnvDraft) async throws {
@@ -149,8 +150,7 @@ extension APIClient {
     // MARK: - 订阅
 
     func fetchSubscriptions() async throws -> [PanelSubscription] {
-        let result: PagedResult<PanelSubscription> = try await list("/subscriptions", query: ["page": "1", "page_size": "200"])
-        return result.items
+        try await fetchAll("/subscriptions")
     }
 
     func pullSubscription(id: Int) async throws {
@@ -159,6 +159,27 @@ extension APIClient {
 
     func setSubscriptionEnabled(id: Int, enabled: Bool) async throws {
         _ = try await send(path: "/subscriptions/\(id)/\(enabled ? "enable" : "disable")", method: "PUT")
+    }
+
+    // MARK: - 分页拉全
+
+    /// 按 100 条一页翻到底。面板对 `page_size > 100` 的处理是**悄悄降级成 20**，
+    /// 所以绝不能靠一个大 page_size 一次拉完。
+    private func fetchAll<T: Decodable>(_ path: String, maxPages: Int = 50) async throws -> [T] {
+        var all: [T] = []
+        var page = 1
+        while page <= maxPages {
+            let result: PagedResult<T> = try await list(path, query: [
+                "page": "\(page)",
+                "page_size": "100"
+            ])
+            all.append(contentsOf: result.items)
+            if result.items.isEmpty { break }
+            if result.total > 0, all.count >= result.total { break }
+            if result.items.count < 100 { break }
+            page += 1
+        }
+        return all
     }
 
     // MARK: - 脚本
