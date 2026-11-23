@@ -97,13 +97,12 @@ extension APIClient {
 
     /// 拼成绝对下载地址。票据已自带鉴权，不要再加 Authorization 头。
     func rawLogURL(_ ticket: RawLogTicket) -> URL? {
-        guard let path = URL(string: ticket.url)?.path,
-              let query = URL(string: ticket.url)?.query
-        else { return nil }
+        // ticket.url 形如 `/api/v1/logs/1574/raw?ticket=v1.xxx`，是相对路径。
+        guard let parsed = URL(string: ticket.url) else { return nil }
         var base = rootURL.absoluteString
         while base.hasSuffix("/") { base.removeLast() }
-        var text = base + path
-        if let query, !query.isEmpty { text += "?" + query }
+        var text = base + parsed.path
+        if let query = parsed.query, !query.isEmpty { text += "?" + query }
         return URL(string: text)
     }
 
