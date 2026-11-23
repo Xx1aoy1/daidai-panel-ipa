@@ -180,9 +180,77 @@ GET <root><url>            →  原始日志字节流（这条路由不挂 JWTAu
 - python 走 `black`（退回 `autopep8`），shell 走 `shfmt`，go 走 `gofmt`，都是面板侧的可执行文件。
 - 没装对应工具时不报错，原样返回且 `formatter == "none"` —— 客户端据此提示「面板没装格式化器」。
 
+#### 系统设置（`/configs`）
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/configs` | — | `{data: {键: {...}}}` —— **map，不是数组** |
+| GET | `/configs/:key` | — | `{data: {key, value, config}}` |
+| POST | `/configs` | `{key, value, description?}` | `{message}` |
+| PUT | `/configs/batch` | `{configs: {键: 值}}` | `{message}`，整组提交 |
+| DELETE | `/configs/:key` | — | `{message}`，重置为「未设置」 |
+
+单项字段：
+
+```
+value_type   bool | int | enum | string      → 决定控件
+value        永远是字符串："true" / "5" / "daily"
+default_value / label / description / group / group_label / order
+secret       仅渲染提示（见下）
+min / max    仅 int 项，用于范围校验
+options      [{value, label}]，仅 enum 项
+registered   false 表示面板内部键，设置页不该展示
+```
+
+实测 **61 项，其中 57 项 `registered`**，分 7 组：任务运行 / 网络代理 / 告警通知 / 订阅拉取 / 安全 / 面板与运行时 / 定时备份。
+另外 4 项是内部键：`machine_code`、`system_health_last_checked_at`、`system_health_last_result_json`、`trusted_proxy_cidrs_migrated`。
+
+关键约束：
+
+- **所有值都是字符串**，布尔写 `"true"` / `"false"`，数字写十进制字符串。
+- `secret` 只是让前端用密码框渲染，**服务端仍然明文回传** `value`。面板源码注释说明了原因：网页端靠回填明文才能在「整组保存」时不把真实值覆盖成空。
+- 整组保存是逐键 `SetConfig`，中途有一项失败时**前面的键已经写入**（接口只回 400 + 首个错误）。
+- 改这几类键会立刻重载运行时，不用重启面板：`timezone`、`trusted_proxy_cidrs`、`max_concurrent_tasks`、`backup_schedule_*`。
+- `*_at` 是面板自己写的时间戳（如 `auto_update_last_checked_at`），客户端渲染成只读。
+
+#### 依赖管理（`/deps`）
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/deps` | — | `{data: [{id, name, type, status, python_version, created_at, updated_at}]}`，**不带 log** |
+| POST | `/deps` | `{type, names: [string], python_version?}` | **201** + `{message, data: [...]}`（平级） |
+| GET | `/deps/:id/status` | — | `{data: {...同上, log}}` |
+| DELETE | `/deps/:id` | `?force=true` | 普通删除 = 先卸载再删记录；`force` = 直接删记录 + 强删文件 |
+| POST | `/deps/batch-delete` | `{ids: [int]}` | 批量强删（跳过处理中的） |
+| PUT | `/deps/:id/reinstall` | — | 用同一条记录重跑安装 |
+| PUT | `/deps/:id/cancel` | — | 只能取消 installing / removing |
+| GET | `/deps/:id/log-stream` | — | SSE 日志流（`event: done` 结束） |
+| GET | `/deps/export` | `?type=nodejs\|python\|linux&python_version=` | **text/plain**，一行一个包名 |
+| GET | `/deps/pip` | `?python_version=` | 裸数组 `[{name, version}]`（pip list --format=json） |
+| GET | `/deps/npm` | — | 裸对象 `{name, dependencies: {包名: {version, overridden}}}` |
+| GET | `/deps/mirrors` | — | 裸对象 `{pip_mirror, npm_mirror, linux_mirror, linux_distribution, linux_package_manager, linux_mirror_supported, linux_mirror_message}` |
+| PUT | `/deps/mirrors` | `{pip_mirror?, npm_mirror?, linux_mirror?}` | **指针判空**：不传的字段不动 |
+| GET | `/deps/python-runtimes` | — | `{data: [{version, label, default, venv_path, venv_healthy, python_path, pip_path, available, message}], default_version}` |
+| PUT | `/deps/python-runtime-default` | `{version}` | 即改配置 `python_default_version` |
+| GET | `/deps/playwright` | — | 裸对象 `{supported, reason, packages, browsers_path, python_installed, browsers_installed, linux_installed, linux_total}` |
+| POST | `/deps/playwright/install` | — | 把系统依赖 + Chromium 排进顺序队列 |
+
+关键约束：
+
+- 状态机：`queued → installing → installed / failed`，卸载走 `removing`，取消后为 `cancelled`。
+  处于 `queued` / `installing` / `removing` 时，删除和重装都回 400「依赖正在处理中」，只能取消。
+- 包名过滤：含 `; | & \` $ ( ) { }` 或**以 `-` 开头**的名字会被面板**静默丢弃**（不建记录、不报错）。
+  客户端在提交前把这类名字标红提示。
+- `type` 只能是 `nodejs` / `python` / `linux`；Python 会按 `python_version` 装进对应 venv，
+  不传则用默认版本；同一个包在 3.10 / 3.11 / 3.12 下是三条独立记录。
+- **返回口径不统一**：`/deps` 与 `/deps/python-runtimes` 包了 `data`，`/deps/mirrors`、`/deps/pip`、
+  `/deps/npm`、`/deps/playwright`、`/deps/export` 都是裸的。
+- `log` 只在 `/deps/:id/status` 返回，列表接口不带。
+- 客户端没用 SSE：移动网络下断线重连比 1.5s 轮询更麻烦，而且 status 接口一次就能拿到全量日志。
+
 ### 仍未接入（面板有、客户端暂时没做）
 
-`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/deps/*`（镜像源、pip/npm 列表、Playwright）、`/configs`（61 项系统设置）、`/system/backup*`（备份与恢复）、`/system/panel-log`、`/system/processes`、`/users`（用户管理）、`/security/*`（登录日志、会话、IP 白名单、2FA、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/backup*`（备份与恢复）、`/system/panel-log`、`/system/processes`、`/users`（用户管理）、`/security/*`（登录日志、会话、IP 白名单、2FA、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
 
 ## 实测补充（面板 v3.4.5）
 

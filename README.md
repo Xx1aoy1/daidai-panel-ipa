@@ -35,6 +35,8 @@
 | 脚本 | 目录树浏览（含子目录）、文件内容查看与**在线编辑保存**、**在线试跑（运行当前内容 / 已保存版本，输出实时跟随、可终止/复制）**、**历史版本只读预览**、**一键格式化（python/shell/go/json，走面板的 black/shfmt/gofmt）**、二进制文件保护 |
 | 通知渠道（admin） | 渠道列表（启用状态、今日发送量、上次测试结果）、**19 种渠道类型**、**按字段定义动态生成的配置表单**（input / password / select / textarea）、新建 / 编辑 / 启停 / 删除、**发送测试消息**、默认推送 vs 绑定推送 |
 | 系统监控（admin） | CPU / 内存 / 磁盘实时占用条、上下行速率与累计流量、健康检查逐项状态（含主动体检）、主机名 / 面板版本 / 部署方式 / 运行时长 / 协程数 / 数据目录，支持每 5 秒自动刷新 |
+| 系统设置（admin） | 面板 `/configs` 的 **57 个注册项、7 个分组**（任务运行 / 网络代理 / 告警通知 / 订阅拉取 / 安全 / 面板与运行时 / 定时备份）：bool 开关、int 数字（带 min/max 校验与范围提示）、enum 下拉、密码框可回显、多行清单；只提交改过的键，保存后立即生效；`*_at` 时间戳渲染成只读 |
+| 依赖管理（admin） | 三类依赖（Node.js / Python / 系统包）列表与筛选、**批量提交安装**（换行/逗号/空格分隔，提交前提示非法包名）、**实时安装日志**（1.5s 轮询 + 自动滚底）、重装 / 取消 / 卸载 / 强制卸载、**镜像源切换**（pip / npm / apt，带常用源预设）、**多版本 Python 默认版本切换**、**Playwright 一键安装**、已装包清单（托管导出 / pip list / npm list -g）与复制分享 |
 | 其他 | 面板信息（版本 / API / 框架）、连接诊断、服务器管理、关于页 |
 
 **暂未实现**（见路线图）：依赖管理、系统设置（`/configs` 61 项）、备份恢复、用户管理、2FA 与安全设置管理、SSE 订阅拉取进度。
@@ -50,10 +52,10 @@
 | 系统版本 | iOS **15.0** 及以上（覆盖 TrollStore 常见机型） |
 | 架构 | arm64（真机），Mac 上可用模拟器跑但不作目标 |
 | 签名 | 仓库产出的 IPA **完全未签名**，仅用于 TrollStore / 自签工具（TrollStore、AltStore、Sideloadly 等） |
-| 账号角色 | `admin` 全功能（任务、环境变量、订阅、脚本、在线运行、**通知渠道、系统监控、日志清理**）；`operator` 可读写任务/环境变量/订阅/脚本与日志清理，但通知渠道与系统监控回 403；`viewer` 收敛为只读（隐藏新建/运行/启停/编辑/删除，环境变量·订阅·脚本不开放） |
+| 账号角色 | `admin` 全功能（任务、环境变量、订阅、脚本、在线运行、**通知渠道、系统监控、系统设置、依赖管理、日志清理**）；`operator` 可读写任务/环境变量/订阅/脚本与日志清理，但通知渠道与系统监控回 403；`viewer` 收敛为只读（隐藏新建/运行/启停/编辑/删除，环境变量·订阅·脚本不开放） |
 | 多定时规则 | 面板把多条 cron 以**换行**存在 `cron_expression`，客户端按行原样读写，编辑不会压成一条 |
 | 命令格式 | 面板只接受托管命令（如 `task xxx.js`）；直接写 `echo`、`ls` 会报「找不到托管依赖命令」，编辑页已作提示 |
-| 通知 / 配置 | `/notifications`、`/configs` 需要 **admin**；通知渠道已接入，系统设置尚未接入 |
+| 通知 / 配置 / 依赖 | `/notifications`、`/configs`、`/deps` 全部需要 **admin**，operator 与 viewer 均回 403；这三块都已接入 |
 
 > 面板默认是 HTTP（`http://IP:5700`）。`Info.plist` 已放开 ATS（`NSAllowsArbitraryLoads`），
 > 否则 iOS 会直接拦掉明文请求。这也是本客户端不能上架 App Store 的原因之一。
@@ -107,6 +109,7 @@ DaidaiPanel-iOS/
     │   ├── APIClient.swift         # 传输层：地址拼接、鉴权头、401 续期、解码兜底
     │   ├── PanelAPI.swift          # 接口层：路径 + 参数 + 模型映射
     │   ├── PanelAPI+Admin.swift    # 管理员接口：通知渠道 / 系统 / 日志管理 / 格式化
+│   ├── PanelAPI+ConfigDeps.swift # 管理员接口：系统设置 / 依赖管理 / 镜像源 / 运行时
     │   ├── ScriptRunner.swift      # 脚本在线运行：启动 → 轮询输出 → 终止/清理
     │   ├── SessionStore.swift      # 会话层：多面板、令牌、Keychain、登录态
     │   ├── KeychainStore.swift     # 令牌存储
@@ -114,7 +117,7 @@ DaidaiPanel-iOS/
     │   ├── PanelError.swift        # 统一错误（含面板 code）
     │   ├── Formatters.swift        # 时间解析与相对时间
     │   └── AppInfo.swift           # 版本号 / 设备信息
-    ├── Models/                     # PanelTask / TaskLog / EnvVar / Subscription / Script / Dashboard / Notifier / SystemInfo / Auth
+    ├── Models/                     # PanelTask / TaskLog / EnvVar / Script / Dashboard / Notifier / SystemInfo / Config / Dependency / Auth
     ├── Components/                 # Theme、状态徽标、统计卡、空态、错误条、分享面板
     └── Features/
         ├── Login/                  # 登录（含 2FA、已保存面板）
@@ -126,6 +129,8 @@ DaidaiPanel-iOS/
         ├── Scripts/                # 目录树 / 编辑器 / 试跑输出 / 历史版本
         ├── Notifications/          # 通知渠道列表 / 动态表单编辑（admin）
         ├── System/                 # 系统监控：资源 / 网络 / 健康检查（admin）
+        ├── Configs/                # 系统设置：按 /configs 的 value_type 渲染表单（admin）
+        ├── Deps/                   # 依赖管理：列表 / 安装 / 详情日志 / 镜像源 / 运行时 / 清单（admin）
         └── Settings/               # 更多 / 服务器 / 面板信息 / 关于
 ```
 
@@ -174,8 +179,8 @@ DaidaiPanel-iOS-1.0.0-unsigned.ipa
 - [x] 通知渠道列表、动态表单、新建/编辑/启停/测试推送（admin）
 - [x] 系统监控（CPU / 内存 / 磁盘 / 网络 / 健康检查，5 秒自动刷新）
 - [x] 日志管理（单条删除、按天数清理、原始日志下载分享）
-- [ ] 依赖管理（pip / npm / 系统包）只读查看
-- [ ] 系统设置（`/configs` 61 项，按分组渲染表单）
+- [x] 依赖管理（安装 / 重装 / 取消 / 卸载 / 实时日志 / 镜像源 / 多版本 Python / Playwright）
+- [x] 系统设置（`/configs` 57 个注册项，按 value_type 动态渲染表单）
 - [ ] 备份创建 / 下载 / 恢复
 - [ ] 用户管理（增删改、重置密码）
 - [ ] 2FA 绑定、会话管理、IP 白名单查看
