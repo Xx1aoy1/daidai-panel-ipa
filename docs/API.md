@@ -119,17 +119,81 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 | GET | `/scripts/versions` | `path=相对路径` | `{data: [{id, script_path, version, message, content_length, created_at}]}`（最多 50 条） |
 | GET | `/scripts/versions/:id` | — | 含 `content` 的完整版本 |
 
-### 未接入（面板有、客户端暂时没做）
+### 管理员接口（全部 `RequireAdmin`，operator / viewer 回 403）
 
-`/scripts/format`、`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/deps/*`、`/notifications/*`（需 admin）、`/configs`（需 admin）、`/system/backup*`、`/system/health-check`、`/system/panel-log`、`/system/processes`、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/open/*`（App Key 开放接口）、`/mcp/*`。
+#### 通知渠道
 
-## 实测补充（面板 v3.4.5 / operator 账号）
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/notifications` | — | `{data: [{id, name, type, config, enabled, push_scope, today_send_count, last_test_at, last_test_status, created_at, updated_at}]}`，**非分页** |
+| GET | `/notifications/types` | — | `{data: [{type, name, icon, fields: [{key, label, widget, placeholder, required, options}]}]}`，实测 **19 种**渠道 |
+| POST | `/notifications` | `{name, type, config, push_scope}` | **201** + `{message, data: {...}}`（注意 `data` 与 `message` 平级，不是包一层） |
+| PUT | `/notifications/:id` | 同上，**按键更新** | 只改请求里出现的键，没传的保持原值 |
+| PUT | `/notifications/:id/enable` \| `/disable` | — | 启停 |
+| POST | `/notifications/:id/test` | — | 真实发一条「呆呆面板测试通知」，失败回 400 + `发送失败: ...` |
+| DELETE | `/notifications/:id` | — | 删除 |
+
+关键约束：
+
+- `config` 是 **JSON 字符串**，不是嵌套对象；值必须**全是字符串**（写进数字/布尔会让该渠道所有推送静默失败）。
+- `push_scope` 只能是 `default` / `bound`；传 `null` 视为「没提供」，跳过不改。
+- `widget` 取值实测有 `input` / `password` / `select` / `textarea`；`select` 的 `options` 是 `[{value, label}]`。
+- 同一类型里 **`key` 可能重复**（`wecom` 的 `content_template` 出现两次，分别叫「文本模板」和「内容模板」），渲染表单时 id 要用 key+label 组合。
+
+#### 系统
+
+| 方法 | 路径 | 返回 |
+| --- | --- | --- |
+| GET | `/system/info` | `{data: {hostname, machine_code, cpu_usage, num_cpu, memory_total/used/free/usage, disk_total/used/free/usage, net_rx_bytes, net_tx_bytes, net_rx_speed, net_tx_speed, uptime, goroutines, go_version, os, arch, deployment_type, data_dir, version}}` |
+| GET | `/system/health-check` | **无 data 外壳**：`{items: [{name, status, message}], last_checked_at}` |
+| POST | `/system/health-check` | 主动体检，结构同上 |
+
+- `uptime` 是中文人话字符串（「16时33分」），不是秒数。
+- 面板对 `page_size > 100` 静默降级成 20 的毛病在这些接口上不适用（都不是分页）。
+
+#### 日志管理（`RequireRole("operator")`）
+
+| 方法 | 路径 | 参数 |
+| --- | --- | --- |
+| DELETE | `/logs/:id` | — |
+| POST | `/logs/batch-delete` | `{ids: [int]}`（另有等价的 `DELETE /logs/batch`） |
+| DELETE | `/logs/clean` | `?days=N`，缺省读配置 `log_retention_days` |
+| GET | `/logs/:id/raw-ticket` | — |
+
+清理会**同时删记录和磁盘文件**。原始日志下载是「换票」模式：
+
+```
+GET /logs/1574/raw-ticket  →  {expires_at, expires_in: 120, filename, size,
+                               url: "/api/v1/logs/1574/raw?ticket=v1.xxx"}
+GET <root><url>            →  原始日志字节流（这条路由不挂 JWTAuth，靠 ticket 验签）
+```
+
+票据 120 秒一次性，`url` 是**相对路径**，要自己拼根地址；下载时不要再带 `Authorization`。
+
+#### 脚本格式化
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| POST | `/scripts/format` | `{content, language, formatter?}` | `{data: {content, language, formatter}}` |
+
+- 只认 **python / shell / go / json**，其他语言回 400「不支持的语言」。
+- python 走 `black`（退回 `autopep8`），shell 走 `shfmt`，go 走 `gofmt`，都是面板侧的可执行文件。
+- 没装对应工具时不报错，原样返回且 `formatter == "none"` —— 客户端据此提示「面板没装格式化器」。
+
+### 仍未接入（面板有、客户端暂时没做）
+
+`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/deps/*`（镜像源、pip/npm 列表、Playwright）、`/configs`（61 项系统设置）、`/system/backup*`（备份与恢复）、`/system/panel-log`、`/system/processes`、`/users`（用户管理）、`/security/*`（登录日志、会话、IP 白名单、2FA、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/open/*`（App Key 开放接口）、`/mcp/*`。
+
+## 实测补充（面板 v3.4.5）
 
 - `POST /tasks` 返回 **201**，体是 `{data: {...}}`（不是 200，也不是裸对象）。
 - 任务命令只接受托管命令（`task xxx.js` 等）；裸 shell（`echo`）会写入失败日志：
   `[执行错误: 找不到托管依赖命令 echo，请先在依赖页面安装对应 Python/Node 依赖，或改用脚本文件命令]`。
 - 订阅的 `type` 是 `git-repo`，上次同步时间是 `last_pull_at`。
 - viewer 访问 `/envs`、`/subscriptions`、`/scripts/tree` 及所有写操作 → `403 权限不足`；
-  `/notifications`、`/configs` 对 operator 也是 `403 需要管理员权限`。
+  `/notifications`、`/configs` 对 operator 也是 `403 需要管理员权限`，**admin 可正常读写**（已用 admin 实测）。
 - `POST /auth/refresh` 只回 `access_token`，**不轮换** refresh token。
 - **分页陷阱**：`page_size` 超过 100 时面板不报错，而是**静默降级成 20**（实测 `/envs?page_size=500` 只回 20 条、89 个变量只看到 20 个）。客户端因此统一用 100 一页翻到底。
+- `response.Success()` 的内部实现是 `c.JSON(200, payload)`，不会额外包一层 `data`。
+  所以「`{data: X}`」还是「裸 X」完全取决于 handler 自己怎么写 —— 同一个面板里两种风格并存，
+  客户端解码必须先试包装、失败再试裸对象。

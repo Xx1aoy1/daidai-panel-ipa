@@ -22,6 +22,18 @@ enum ScriptLanguage {
         detect(path: path) != nil
     }
 
+    /// 面板 `POST /scripts/format` 只认 python / shell / go / json 四种，
+    /// JavaScript / TypeScript 传过去会被回 400「不支持的语言」，所以这里先挡一层。
+    static func formatterLanguage(path: String) -> String? {
+        if path.lowercased().hasSuffix(".json") { return "json" }
+        switch detect(path: path) {
+        case "python": return "python"
+        case "shell": return "shell"
+        case "go": return "go"
+        default: return nil
+        }
+    }
+
     static func displayName(for language: String) -> String {
         switch language {
         case "python": return "Python"

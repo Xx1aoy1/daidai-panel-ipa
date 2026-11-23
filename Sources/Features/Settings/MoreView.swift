@@ -33,6 +33,27 @@ struct MoreView: View {
                     }
                 }
 
+                Section {
+                    if session.user?.isAdmin == true {
+                        NavigationLink(destination: SystemInfoView()) {
+                            Label("系统监控", systemImage: "cpu")
+                        }
+                        NavigationLink(destination: NotificationListView()) {
+                            Label("通知渠道", systemImage: "bell.badge.fill")
+                        }
+                    } else {
+                        adminLockRow("系统监控", icon: "cpu")
+                        adminLockRow("通知渠道", icon: "bell.badge.fill")
+                    }
+                } header: {
+                    Text("管理员")
+                } footer: {
+                    if session.user?.isAdmin != true {
+                        Text("系统信息与通知渠道这两组接口面板只对管理员开放，operator / viewer 调用会 403，所以这里不开放入口。")
+                            .font(.system(size: 11))
+                    }
+                }
+
                 Section(header: Text("服务器")) {
                     NavigationLink(destination: ServerListView()) {
                         HStack(spacing: 10) {
@@ -113,6 +134,24 @@ struct MoreView: View {
                 .foregroundColor(.secondary)
             Spacer()
             Text("只读")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Image(systemName: "lock.fill")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    /// 非管理员看到的占位行：和 lockRow 一样不给导航，只是角标文案不同。
+    private func adminLockRow(_ title: String, icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(.secondary)
+                .frame(width: 22)
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text("需管理员")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
             Image(systemName: "lock.fill")
