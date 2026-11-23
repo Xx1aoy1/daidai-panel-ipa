@@ -12,6 +12,7 @@ struct ScriptBrowserView: View {
     @State private var isLoading = false
     @State private var errorText: String?
     @State private var keyword = ""
+    @State private var runNode: ScriptNode?
 
     init(nodes: [ScriptNode]? = nil, title: String = "脚本文件") {
         self.nodes = nodes
@@ -63,10 +64,22 @@ struct ScriptBrowserView: View {
                             NavigationLink(destination: ScriptBrowserView(nodes: node.children ?? [], title: node.displayName)) {
                                 ScriptNodeRow(node: node)
                             }
-                        } else {
-                            NavigationLink(destination: ScriptEditorView(path: node.path ?? "", name: node.displayName)) {
+                        } else if node.isEditable {
+                            NavigationLink(destination: ScriptEditorView(path: node.path, name: node.displayName)) {
                                 ScriptNodeRow(node: node)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if ScriptLanguage.canRun(path: node.path) {
+                                    Button {
+                                        runNode = node
+                                    } label: {
+                                        Label("运行", systemImage: "play.fill")
+                                    }
+                                    .tint(AppTheme.success)
+                                }
+                            }
+                        } else {
+                            ScriptNodeRow(node: node)
                         }
                     }
                 }
@@ -78,6 +91,10 @@ struct ScriptBrowserView: View {
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $keyword, prompt: "筛选当前目录")
+        .sheet(item: $runNode) { node in
+            ScriptRunView(title: node.displayName, source: .saved(path: node.path))
+                .environmentObject(session)
+        }
         .task {
             if isRoot && loaded.isEmpty { await load() }
         }

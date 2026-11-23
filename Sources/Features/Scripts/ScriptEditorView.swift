@@ -13,8 +13,11 @@ struct ScriptEditorView: View {
     @State private var isBinary = false
     @State private var errorText: String?
     @State private var toast: String?
+    @State private var runRequest: RunRequest?
+    @State private var showVersions = false
 
     private var isDirty: Bool { content != original }
+    private var canRun: Bool { !isBinary && !isLoading && ScriptLanguage.canRun(path: path) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,7 +50,32 @@ struct ScriptEditorView: View {
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                if canRun {
+                    Menu {
+                        Button {
+                            runInline()
+                        } label: {
+                            Label(isDirty ? "运行当前内容（未保存）" : "运行", systemImage: "play.fill")
+                        }
+                        if isDirty {
+                            Button {
+                                runSaved()
+                            } label: {
+                                Label("运行已保存的版本", systemImage: "clock.arrow.circlepath")
+                            }
+                        }
+                        Divider()
+                        Button {
+                            showVersions = true
+                        } label: {
+                            Label("历史版本", systemImage: "list.bullet.rectangle")
+                        }
+                    } label: {
+                        Image(systemName: "play.circle")
+                    }
+                }
+
                 Button {
                     save()
                 } label: {
@@ -73,6 +101,14 @@ struct ScriptEditorView: View {
                     .clipShape(Capsule())
                     .padding(.bottom, 22)
             }
+        }
+        .sheet(item: $runRequest) { request in
+            ScriptRunView(title: request.title, source: request.source)
+                .environmentObject(session)
+        }
+        .sheet(isPresented: $showVersions) {
+            ScriptVersionListView(path: path, name: name)
+                .environmentObject(session)
         }
         .task { await load() }
     }
@@ -118,6 +154,15 @@ struct ScriptEditorView: View {
         }
     }
 
+    private func runInline() {
+        runRequest = RunRequest(title: "运行预览",
+                                source: .inline(path: path, content: content))
+    }
+
+    private func runSaved() {
+        runRequest = RunRequest(title: "运行已保存版本", source: .saved(path: path))
+    }
+
     private func flash(_ text: String) {
         withAnimation { toast = text }
         Task {
@@ -125,4 +170,10 @@ struct ScriptEditorView: View {
             withAnimation { toast = nil }
         }
     }
+}
+
+private struct RunRequest: Identifiable {
+    let id = UUID()
+    let title: String
+    let source: ScriptRunner.Source
 }
