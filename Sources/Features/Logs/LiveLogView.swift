@@ -64,10 +64,10 @@ struct LiveLogView: View {
     private var statusBar: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(poller.isDone ? AppTheme.idle : (poller.isRunning ? AppTheme.success : AppTheme.warning))
+                .fill(poller.isDone ? doneColor : (poller.isRunning ? AppTheme.success : AppTheme.warning))
                 .frame(width: 7, height: 7)
 
-            Text(poller.isDone ? "已结束" : (poller.isRunning ? "跟随中" : "已停止"))
+            Text(statusText)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary)
 
@@ -107,5 +107,29 @@ struct LiveLogView: View {
     private func start() {
         guard let client = session.client else { return }
         poller.start(client: client, taskID: taskID)
+    }
+
+    /// 结束后用 latest-log 的 status 给出真实结论（0 成功 / 1 失败 / 3 终止）。
+    private var statusText: String {
+        if poller.isRunning { return "跟随中" }
+        if poller.isDone {
+            switch poller.finalLogStatus {
+            case 0: return "执行成功"
+            case 1: return "执行失败"
+            case 3: return "已终止"
+            case 2: return "运行中"
+            default: return "已结束"
+            }
+        }
+        return "已停止"
+    }
+
+    private var doneColor: Color {
+        switch poller.finalLogStatus {
+        case 0: return AppTheme.success
+        case 1: return AppTheme.failure
+        case 3: return AppTheme.warning
+        default: return AppTheme.idle
+        }
     }
 }

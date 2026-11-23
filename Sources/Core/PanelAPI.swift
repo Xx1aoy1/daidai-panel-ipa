@@ -183,4 +183,87 @@ extension APIClient {
                            method: "PUT",
                            json: ["path": path, "content": content])
     }
+
+    /// 版本历史：面板每次保存都会留一个版本。
+    func fetchScriptVersions(path: String) async throws -> [ScriptVersion] {
+        let result: PagedResult<ScriptVersion> = try await list("/scripts/versions",
+                                                               query: ["path": path])
+        return result.items
+    }
+
+    /// 单个历史版本的内容（`GET /scripts/versions/:id`）。
+    func fetchScriptVersion(id: Int) async throws -> ScriptVersionDetail {
+        try await object("/scripts/versions/\(id)")
+    }
+
+    // MARK: - 在线运行
+
+    /// 运行一个已保存的脚本文件，返回 run_id（用于轮询输出）。
+    /// 传入 `content` 时会改成「运行这份内容」，不必先保存（面板支持 path + content + language 组合）。
+    func runSavedScript(path: String,
+                        content: String? = nil,
+                        language: String? = nil) async throws -> String {
+        var body: [String: Any] = [:]
+        if !path.isEmpty { body["path"] = path }
+        if let content, !content.isEmpty {
+            body["content"] = content
+            body["language"] = language ?? ScriptLanguage.detect(path: path) ?? "python"
+        }
+        let data = try await send(path: "/scripts/run", method: "POST", json: body)
+        let payload: RunIDPayload = try APIClient.decodeObject(data)
+        return payload.runId ?? ""
+    }
+
+    /// 运行一段临时代码（不落盘到脚本目录）。
+    func runCode(_ code: String, language: String) async throws -> String {
+        let data = try await send(path: "/scripts/run-code",
+                                  method: "POST",
+                                  json: ["code": code, "language": language])
+        let payload: RunIDPayload = try APIClient.decodeObject(data)
+        return payload.runId ?? ""
+    }
+
+    func debugLogs(runID: String) async throws -> DebugRunSnapshot {
+        try await object("/scripts/run/\(escaped(runID))/logs")
+    }
+
+    func stopDebugRun(runID: String) async throws {
+        _ = try await send(path: "/scripts/run/\(escaped(runID))/stop", method: "PUT")
+    }
+
+    func clearDebugRun(runID: String) async throws {
+        _ = try await send(path: "/scripts/run/\(escaped(runID))", method: "DELETE")
+    }
+
+    // MARK: - Cron 工具
+
+    /// 面板内置的模板列表（裸数组，没有 data 外壳）。
+    func fetchCronTemplates() async throws -> [CronTemplate] {
+        let data = try await send(path: "/tasks/cron/templates")
+        if let list = try? APIClient.decoder.decode([CronTemplate].self, from: data) {
+            return list
+        }
+        if let envelope = try? APIClient.decoder.decode(DataEnvelope<[CronTemplate]>.self, from: data) {
+            return envelope.data
+        }
+        throw PanelError.decoding("Cron 模板解析失败")
+    }
+
+    /// 让面板解释表达式并算出下次执行时间。
+    func parseCron(_ expression: String) async throws -> CronParseResult {
+        let data = try await send(path: "/tasks/cron/parse",
+                                  method: "POST",
+                                  json: ["expression": expression])
+        return try APIClient.decodeObject(data)
+    }
+
+    /// run_id 里可能带文件名，放路径前先转义。
+    private func escaped(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+}
+
+private struct RunIDPayload: Decodable {
+    var runId: String?
+    var message: String?
 }

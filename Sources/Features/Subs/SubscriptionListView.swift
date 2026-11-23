@@ -134,9 +134,7 @@ struct SubscriptionListView: View {
                 }
                 HStack(spacing: 8) {
                     Text("同步 \(sub.scheduleText)")
-                    if let lastRunAt = sub.lastRunAt {
-                        Text("· 上次 \(DateText.relative(lastRunAt))")
-                    }
+                    Text("· 上次拉取 \(sub.pullText)")
                 }
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
