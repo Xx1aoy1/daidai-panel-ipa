@@ -33,10 +33,30 @@ enum DateParser {
         guard var text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         if let date = isoWithFraction.date(from: text) { return date }
         if let date = isoPlain.date(from: text) { return date }
+        // Go 的 time.Time 序列化出来是 9 位纳秒（2026-11-23T19:32:12.433947741+08:00），
+        // ISO8601DateFormatter 对超过 3 位的小数秒不稳，先裁到毫秒再试一次。
+        let shortened = trimFraction(text)
+        if shortened != text, let date = isoWithFraction.date(from: shortened) { return date }
         if text.hasSuffix("Z") { text.removeLast() }
         if let date = plainFormatter.date(from: text) { return date }
         if let date = plainNoSeconds.date(from: text) { return date }
+        let shortenedPlain = trimFraction(text)
+        if shortenedPlain != text, let date = plainFormatter.date(from: shortenedPlain) { return date }
         return nil
+    }
+
+    /// 把小数秒部分截到 3 位，其余位数丢掉。没有小数或本来就不超过 3 位时原样返回。
+    private static func trimFraction(_ text: String) -> String {
+        guard let dot = text.firstIndex(of: ".") else { return text }
+        var index = text.index(after: dot)
+        var digits = 0
+        while index < text.endIndex, text[index].isNumber {
+            index = text.index(after: index)
+            digits += 1
+        }
+        guard digits > 3 else { return text }
+        let keep = text.index(dot, offsetBy: 4)
+        return String(text[text.startIndex..<keep]) + String(text[index...])
     }
 }
 

@@ -37,9 +37,11 @@
 | 系统监控（admin） | CPU / 内存 / 磁盘实时占用条、上下行速率与累计流量、健康检查逐项状态（含主动体检）、主机名 / 面板版本 / 部署方式 / 运行时长 / 协程数 / 数据目录，支持每 5 秒自动刷新 |
 | 系统设置（admin） | 面板 `/configs` 的 **57 个注册项、7 个分组**（任务运行 / 网络代理 / 告警通知 / 订阅拉取 / 安全 / 面板与运行时 / 定时备份）：bool 开关、int 数字（带 min/max 校验与范围提示）、enum 下拉、密码框可回显、多行清单；只提交改过的键，保存后立即生效；`*_at` 时间戳渲染成只读 |
 | 依赖管理（admin） | 三类依赖（Node.js / Python / 系统包）列表与筛选、**批量提交安装**（换行/逗号/空格分隔，提交前提示非法包名）、**实时安装日志**（1.5s 轮询 + 自动滚底）、重装 / 取消 / 卸载 / 强制卸载、**镜像源切换**（pip / npm / apt，带常用源预设）、**多版本 Python 默认版本切换**、**Playwright 一键安装**、已装包清单（托管导出 / pip list / npm list -g）与复制分享 |
+| 备份与恢复（admin） | 备份列表（大小 / 时间 / 是否加密）、**创建备份**（8 类内容可勾选、可加密码写成 `.enc`）、**从文件上传**（.json/.enc/.tgz/.tar.gz，服务端会校验内容）、下载到本机走系统分享、删除；**恢复**带风险提示 + 输入「恢复」二次确认、**实时进度**（1 秒轮询 stage/percent）、完成后引导重新登录与重启面板 |
+| 用户管理（admin） | 账号列表（角色 / 启停 / 最后登录 / 2FA 标记）、**新建账号**（三种角色说明、本地校验用户名与密码规则）、**改角色 / 启停**（立即踢下线并提示）、**重置密码**（同时清通行密钥）、删除；不能删自己、不能禁用自己 |
 | 其他 | 面板信息（版本 / API / 框架）、连接诊断、服务器管理、关于页 |
 
-**暂未实现**（见路线图）：依赖管理、系统设置（`/configs` 61 项）、备份恢复、用户管理、2FA 与安全设置管理、SSE 订阅拉取进度。
+**暂未实现**（见路线图）：安全设置（登录日志、会话踢下线、IP 白名单、2FA 绑定、Passkey）、后台进程、脚本上传/重命名/回滚、SSE 订阅拉取进度。
 这些都在面板网页端仍可操作，客户端不阻塞。
 
 ---
@@ -52,10 +54,10 @@
 | 系统版本 | iOS **15.0** 及以上（覆盖 TrollStore 常见机型） |
 | 架构 | arm64（真机），Mac 上可用模拟器跑但不作目标 |
 | 签名 | 仓库产出的 IPA **完全未签名**，仅用于 TrollStore / 自签工具（TrollStore、AltStore、Sideloadly 等） |
-| 账号角色 | `admin` 全功能（任务、环境变量、订阅、脚本、在线运行、**通知渠道、系统监控、系统设置、依赖管理、日志清理**）；`operator` 可读写任务/环境变量/订阅/脚本与日志清理，但通知渠道与系统监控回 403；`viewer` 收敛为只读（隐藏新建/运行/启停/编辑/删除，环境变量·订阅·脚本不开放） |
+| 账号角色 | `admin` 全功能（任务、环境变量、订阅、脚本、在线运行、**通知渠道、系统监控、系统设置、依赖管理、备份恢复、用户管理、日志清理**）；`operator` 可读写任务/环境变量/订阅/脚本与日志清理，但通知渠道与系统监控回 403；`viewer` 收敛为只读（隐藏新建/运行/启停/编辑/删除，环境变量·订阅·脚本不开放） |
 | 多定时规则 | 面板把多条 cron 以**换行**存在 `cron_expression`，客户端按行原样读写，编辑不会压成一条 |
 | 命令格式 | 面板只接受托管命令（如 `task xxx.js`）；直接写 `echo`、`ls` 会报「找不到托管依赖命令」，编辑页已作提示 |
-| 通知 / 配置 / 依赖 | `/notifications`、`/configs`、`/deps` 全部需要 **admin**，operator 与 viewer 均回 403；这三块都已接入 |
+| 通知 / 配置 / 依赖 / 备份 / 用户 | `/notifications`、`/configs`、`/deps`、`/system/backup*`、`/users` 全部需要 **admin**，operator 与 viewer 均回 403；这五块都已接入 |
 
 > 面板默认是 HTTP（`http://IP:5700`）。`Info.plist` 已放开 ATS（`NSAllowsArbitraryLoads`），
 > 否则 iOS 会直接拦掉明文请求。这也是本客户端不能上架 App Store 的原因之一。
@@ -110,6 +112,7 @@ DaidaiPanel-iOS/
     │   ├── PanelAPI.swift          # 接口层：路径 + 参数 + 模型映射
     │   ├── PanelAPI+Admin.swift    # 管理员接口：通知渠道 / 系统 / 日志管理 / 格式化
 │   ├── PanelAPI+ConfigDeps.swift # 管理员接口：系统设置 / 依赖管理 / 镜像源 / 运行时
+│   ├── PanelAPI+BackupUser.swift # 管理员接口：备份 / 恢复进度 / 用户管理
     │   ├── ScriptRunner.swift      # 脚本在线运行：启动 → 轮询输出 → 终止/清理
     │   ├── SessionStore.swift      # 会话层：多面板、令牌、Keychain、登录态
     │   ├── KeychainStore.swift     # 令牌存储
@@ -117,7 +120,7 @@ DaidaiPanel-iOS/
     │   ├── PanelError.swift        # 统一错误（含面板 code）
     │   ├── Formatters.swift        # 时间解析与相对时间
     │   └── AppInfo.swift           # 版本号 / 设备信息
-    ├── Models/                     # PanelTask / TaskLog / EnvVar / Script / Dashboard / Notifier / SystemInfo / Config / Dependency / Auth
+    ├── Models/                     # PanelTask / TaskLog / EnvVar / Script / Dashboard / Notifier / SystemInfo / Config / Dependency / Backup / Account / Auth
     ├── Components/                 # Theme、状态徽标、统计卡、空态、错误条、分享面板
     └── Features/
         ├── Login/                  # 登录（含 2FA、已保存面板）
@@ -131,6 +134,8 @@ DaidaiPanel-iOS/
         ├── System/                 # 系统监控：资源 / 网络 / 健康检查（admin）
         ├── Configs/                # 系统设置：按 /configs 的 value_type 渲染表单（admin）
         ├── Deps/                   # 依赖管理：列表 / 安装 / 详情日志 / 镜像源 / 运行时 / 清单（admin）
+        ├── Backup/                 # 备份恢复：列表 / 新建 / 详情 / 恢复进度（admin）
+        ├── Users/                  # 用户管理：列表 / 新建 / 详情 / 重置密码（admin）
         └── Settings/               # 更多 / 服务器 / 面板信息 / 关于
 ```
 
@@ -181,8 +186,8 @@ DaidaiPanel-iOS-1.0.0-unsigned.ipa
 - [x] 日志管理（单条删除、按天数清理、原始日志下载分享）
 - [x] 依赖管理（安装 / 重装 / 取消 / 卸载 / 实时日志 / 镜像源 / 多版本 Python / Playwright）
 - [x] 系统设置（`/configs` 57 个注册项，按 value_type 动态渲染表单）
-- [ ] 备份创建 / 下载 / 恢复
-- [ ] 用户管理（增删改、重置密码）
+- [x] 备份创建 / 上传 / 下载 / 删除 / 恢复（含实时进度）
+- [x] 用户管理（新建 / 改角色 / 启停 / 重置密码 / 删除）
 - [ ] 2FA 绑定、会话管理、IP 白名单查看
 - [ ] 后台进程列表与终止
 - [ ] 小组件（Widget）展示今日执行概况

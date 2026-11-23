@@ -240,4 +240,122 @@ final class APIClient {
         }
         return bytes
     }
+
+    // MARK: - 长耗时请求（恢复备份 / 下载大文件 / 上传备份）
+
+    /// 恢复备份是同步阻塞的：整库替换可能跑好几分钟，普通会话 90 秒就超时。
+    /// 这里走 2 小时超时的会话，并且**不做 401 自动续期重试**——
+    /// 恢复是一次性副作用操作，重放同一个请求等于再恢复一遍。
+    func sendLongRunning(path: String,
+                         method: String = "POST",
+                         query: [String: String] = [:],
+                         json: Any? = nil) async throws -> Data {
+        let request = try makeRequest(path: path, method: method, query: query, json: json, authorized: true)
+        return try await executeLong(request)
+    }
+
+    /// 下载二进制（备份文件）。返回内容与 Content-Disposition 里的文件名。
+    func downloadBinary(path: String, query: [String: String] = [:]) async throws -> (data: Data, filename: String?) {
+        let request = try makeRequest(path: path, method: "GET", query: query, json: nil, authorized: true)
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await streamSession.data(for: request)
+        } catch {
+            throw PanelError.transport(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw PanelError.transport("服务器没有返回有效响应")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw errorFrom(data: data, status: http.statusCode)
+        }
+        return (data, Self.filename(from: http))
+    }
+
+    /// multipart 上传（备份文件）。文件名带中文时同时给 filename*，避免被截成乱码。
+    func uploadMultipart(path: String,
+                         field: String,
+                         filename: String,
+                         mimeType: String,
+                         fileData: Data) async throws -> Data {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(Self.asciiFallbackName(filename))\"; filename*=UTF-8''\(Self.percentEncodedName(filename))\r\n".utf8))
+        body.append(Data("Content-Type: \(mimeType)\r\n\r\n".utf8))
+        body.append(fileData)
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+
+        var request = try makeRequest(path: path, method: "POST", query: [:], json: nil, authorized: true)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return try await executeLong(request)
+    }
+
+    private func executeLong(_ request: URLRequest) async throws -> Data {
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await streamSession.data(for: request)
+        } catch {
+            throw PanelError.transport(error.localizedDescription)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw PanelError.transport("服务器没有返回有效响应")
+        }
+        if (200..<300).contains(http.statusCode) { return data }
+        throw errorFrom(data: data, status: http.statusCode)
+    }
+
+    private func errorFrom(data: Data, status: Int) -> PanelError {
+        let body = try? Self.decoder.decode(APIErrorBody.self, from: data)
+        if status == 401 {
+            return PanelError.unauthorized(message: body?.error, code: body?.code)
+        }
+        return PanelError.server(status: status,
+                                 message: body?.error ?? "请求失败（HTTP \(status)）",
+                                 code: body?.code)
+    }
+
+    private static func filename(from response: HTTPURLResponse) -> String? {
+        guard let disposition = response.value(forHTTPHeaderField: "Content-Disposition") else { return nil }
+        // 形如 `attachment; filename="apitest.tgz"`，也可能带 filename*=UTF-8''...
+        // filename* 优先（带中文名的备份只能靠它），普通的留作兜底。
+        var plain: String?
+        for part in disposition.split(separator: ";") {
+            let text = part.trimmingCharacters(in: .whitespaces)
+            if text.lowercased().hasPrefix("filename*=") {
+                let raw = String(text.dropFirst("filename*=".count))
+                if let range = raw.range(of: "''"),
+                   let decoded = String(raw[range.upperBound...]).removingPercentEncoding {
+                    return decoded
+                }
+            }
+            if text.lowercased().hasPrefix("filename=") {
+                let raw = String(text.dropFirst("filename=".count))
+                plain = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            }
+        }
+        return plain
+    }
+
+    /// 面板只认扩展名，ASCII 兜底名也要保住后缀（`.tar.gz` 是双后缀）。
+    private static func asciiFallbackName(_ name: String) -> String {
+        if name.unicodeScalars.allSatisfy({ $0.isASCII }) { return name }
+        let lowered = name.lowercased()
+        let suffix: String
+        if lowered.hasSuffix(".tar.gz") {
+            suffix = ".tar.gz"
+        } else if let dot = name.lastIndex(of: ".") {
+            suffix = String(name[dot...])
+        } else {
+            suffix = ".tgz"
+        }
+        return "backup" + suffix
+    }
+
+    private static func percentEncodedName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        return name.addingPercentEncoding(withAllowedCharacters: allowed) ?? name
+    }
 }

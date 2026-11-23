@@ -248,9 +248,66 @@ registered   false 表示面板内部键，设置页不该展示
 - `log` 只在 `/deps/:id/status` 返回，列表接口不带。
 - 客户端没用 SSE：移动网络下断线重连比 1.5s 轮询更麻烦，而且 status 接口一次就能拿到全量日志。
 
+#### 备份与恢复（`/system/backup*`、`/system/restore*`）
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/system/backups` | — | `{data: [{name, size, created_at}]}`，**空目录回 `{data:null}`** |
+| POST | `/system/backup` | `{name?, password?, selection:{configs,tasks,subscriptions,env_vars,logs,scripts,dependencies,task_views}}` | `{message, data:{path}}`，path 是**服务端绝对路径** |
+| DELETE | `/system/backup` | `?filename=` | `{message}` |
+| GET | `/system/backup/download` | `?filename=` 或 `/download/:filename` | 二进制 + `Content-Disposition: attachment`，**需要 Authorization** |
+| POST | `/system/backup/upload` | multipart，字段名 `file` | `{message, data:{filename}}`（同名会自动 `-1` 后缀） |
+| POST | `/system/restore` | `{filename, password?}` | `{message}`，**同步阻塞到整库替换完成** |
+| GET | `/system/restore/progress` | — | `{data: {active, status, stage, message, percent, error, source, selection, started_at, updated_at}}` |
+| POST | `/system/restart` | — | 重启面板（连接会断开） |
+
+关键约束：
+
+- 列表记录只来自目录文件本身：`name` / `size` / `created_at`（文件 mtime），没有「备份了哪些项」的元数据。
+  空目录时 `data` 是 **null 而不是 []**，解析要按空数组兜。
+- 不传 `password` 写 `.tgz`（gzip tar），传了就写 `.enc`。
+  加密格式（v3.4.2 起）：`DDPENC02` 魔数 + 16 字节随机盐 + GCM nonce + 密文，
+  密钥由 **PBKDF2-HMAC-SHA256 / 600000 轮**派生；老备份是 `SHA-256(password)` 单次派生，只解不写。
+  **密码丢了无法恢复**，面板没有找回入口。
+- `selection` 八个开关全 `false` 时服务端会 `NormalizeDefaults()` 退回「全选」，
+  所以客户端必须在提交前挡住空选择，否则用户以为什么都没备。
+- `name` 留空由服务端生成 `backup_yyyyMMdd_HHmmss`；带后缀会被剥掉再按加密与否补 `.tgz` / `.enc`。
+- 上传限制 **512MB**，只认 `.json` / `.enc` / `.tgz` / `.tar.gz`，且会**校验内容**（gzip 头或 JSON），
+  不是光看扩展名。校验通过才从临时文件改名，列表接口会隐藏 `.upload-*` 临时文件。
+- 恢复是**同步阻塞**的整库替换：普通会话 90 秒超时不够用，客户端改走 2 小时超时的会话，
+  并且**不做 401 自动续期重试**（重放同一个请求等于再恢复一遍）。
+- 恢复期间用 `GET /system/restore/progress` 轮询（1 秒一次）：`status` 取 `idle / running / completed / failed`，
+  空闲时 `updated_at` 是 `0001-01-01T00:00:00Z`。进度是面板进程内的内存状态，重启即清空。
+- 恢复**会替换用户表**（备份勾了 configs 时），当前登录态大概率失效，客户端恢复完引导重新登录。
+- 恢复**不会自动重启**，接口返回的 message 里写「正在准备重启面板」只是文案，
+  要让运行时按新配置生效得显式调 `POST /system/restart`。
+
+#### 用户管理（`/users`）
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/users` | — | `{data: [{id, username, role, enabled, avatar_url, last_login_at, created_at, updated_at, two_factor_enabled}]}` |
+| POST | `/users` | `{username, password, role}` | **201** + `{message, data:{...}}`（平级） |
+| PUT | `/users/:id` | `{role?, enabled?}` | `{message, data:{...}}` |
+| DELETE | `/users/:id` | — | `{message}` |
+| PUT | `/users/:id/reset-password` | `{password}` | `{message}` |
+
+关键约束：
+
+- `role` 只有 `admin` / `operator` / `viewer`；创建时缺省是 `operator`。
+- `two_factor_enabled` 不在 user 表里，是列表接口额外查一次 2FA 表合并出来的。
+- **改角色、改启用状态、重置密码、删除，四条路径都会 `RevokeAllUserSessions`**：
+  对方手上的 access token 立刻失效，不只是下次登录被拒。界面上必须提前说清楚。
+- `DELETE /users/:id` 删自己回 **400「不能删除自己」**；删除会连带清掉该用户的 passkey
+  （SQLite 可能复用 id，留着孤儿 passkey 会让新用户继承旧通行密钥）。
+- 重置密码会**清该用户的全部 passkey**，返回值里会注明清掉了几个。
+- 用户名规则：1-32 位，中文 / 字母 / 数字 / 下划线。
+  密码规则（只用于「设置新密码」，登录不校验）：至少 8 个字符、UTF-8 不超过 **72 字节**（bcrypt 硬限制），
+  字母 / 数字 / 符号三类里至少含两类。
+
 ### 仍未接入（面板有、客户端暂时没做）
 
-`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/backup*`（备份与恢复）、`/system/panel-log`、`/system/processes`、`/users`（用户管理）、`/security/*`（登录日志、会话、IP 白名单、2FA、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/*`（登录日志、会话踢下线、IP 白名单、2FA 绑定、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
 
 ## 实测补充（面板 v3.4.5）
 

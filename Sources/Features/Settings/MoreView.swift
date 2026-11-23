@@ -47,17 +47,25 @@ struct MoreView: View {
                         NavigationLink(destination: DependencyListView()) {
                             Label("依赖管理", systemImage: "shippingbox.fill")
                         }
+                        NavigationLink(destination: BackupListView()) {
+                            Label("备份与恢复", systemImage: "externaldrive.fill")
+                        }
+                        NavigationLink(destination: UserListView()) {
+                            Label("用户管理", systemImage: "person.2.fill")
+                        }
                     } else {
                         adminLockRow("系统监控", icon: "cpu")
                         adminLockRow("通知渠道", icon: "bell.badge.fill")
                         adminLockRow("系统设置", icon: "slider.horizontal.3")
                         adminLockRow("依赖管理", icon: "shippingbox.fill")
+                        adminLockRow("备份与恢复", icon: "externaldrive.fill")
+                        adminLockRow("用户管理", icon: "person.2.fill")
                     }
                 } header: {
                     Text("管理员")
                 } footer: {
                     if session.user?.isAdmin != true {
-                        Text("系统信息、通知渠道、系统设置、依赖管理这几组接口面板只对管理员开放，operator / viewer 调用会 403，所以这里不开放入口。")
+                        Text("系统信息、通知渠道、系统设置、依赖管理、备份恢复与用户管理这几组接口面板只对管理员开放，operator / viewer 调用会 403，所以这里不开放入口。")
                             .font(.system(size: 11))
                     }
                 }
