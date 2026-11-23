@@ -36,6 +36,7 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 | 字段 | 取值 |
 | --- | --- |
 | 任务 `status`（float） | `0` 禁用 / `0.5` 排队中 / `1` 空闲（已启用） / `2` 运行中 |
+| `/tasks/:id/live-logs` 的 `status` | **任务状态**（同上），不是日志状态 |
 | 任务 `enabled`（bool） | 开关位，与运行态无关（禁用任务手动运行也会变成 0.5/2） |
 | 日志 `status`（int） | `0` 成功 / `1` 失败 / `2` 运行中 / `3` 手动终止 |
 
@@ -72,7 +73,9 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 | PUT | `/tasks/:id/enable` \| `/disable` | — | 开关 |
 | DELETE | `/tasks/:id` | — | 删除任务（脚本文件保留） |
 | GET | `/tasks/:id/latest-log` | — | 返回日志对象本体（含 `content`），可能是 404「还没有日志记录」 |
-| GET | `/tasks/:id/live-logs` | — | **快照**：`{logs: [string], done: bool, status: float}`，不是 SSE |
+| GET | `/tasks/:id/live-logs` | — | **快照**：`{logs: [string], done: bool, status: float}`，不是 SSE。`done=true` 时面板已清空内存缓冲、`logs` 恒为 `[]`，必须改读 `latest-log` |
+| GET | `/tasks/cron/templates` | — | **裸数组** `[{name, expression, category, description}]`，表达式可能是 6 位（带秒） |
+| POST | `/tasks/cron/parse` | `{expression}` | `{is_valid, description, format, next_run_times[]}` |
 
 ### 日志
 
@@ -105,10 +108,27 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 
 | 方法 | 路径 | 参数 | 返回 |
 | --- | --- | --- | --- |
-| GET | `/scripts/tree` | — | `{data: [{name, path, type, size, children[]}]}`，`type` 为 `directory` 或 `file` |
+| GET | `/scripts/tree` | — | `{data: [...]}`，节点真实字段是 **`key`（完整相对路径）、`title`、`type`、`isLeaf`、`extension`、`size`、`mtime`、`children[]`** —— 注意没有 `name` / `path` |
 | GET | `/scripts/content` | `path=相对路径` | `{data: {path, content, binary, size}}`；二进制返回 base64 且 `binary=true` |
-| PUT | `/scripts/content` | `{path, content}` | 保存 |
+| PUT | `/scripts/content` | `{path, content, message?}` | 保存，返回 `{message, version}` |
+| POST | `/scripts/run` | `{path}` 或 `{path, content, language}` | **201** + `{message, run_id}`；带 `content` 表示跑这段内容不落盘 |
+| POST | `/scripts/run-code` | `{code, language}` | **201** + `{message, run_id}`；`language` ∈ python/javascript/node/typescript/shell/bash/go |
+| GET | `/scripts/run/:run_id/logs` | — | `{data: {logs: [string], done: bool, exit_code: int\|null, status: "running"\|"success"\|"failed"\|"stopped"}}`，结束后**不清空** |
+| PUT | `/scripts/run/:run_id/stop` | — | 终止 |
+| DELETE | `/scripts/run/:run_id` | — | 清除临时运行记录 |
+| GET | `/scripts/versions` | `path=相对路径` | `{data: [{id, script_path, version, message, content_length, created_at}]}`（最多 50 条） |
+| GET | `/scripts/versions/:id` | — | 含 `content` 的完整版本 |
 
 ### 未接入（面板有、客户端暂时没做）
 
-`/scripts/run`、`/scripts/format`、`/scripts/versions`、`/deps/*`、`/notifications/*`、`/system/backup*`、`/system/health-check`、`/system/panel-log`、`/system/processes`、`/tasks/batch/*`、`/tasks/views`、`/envs/import|export`、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/format`、`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/deps/*`、`/notifications/*`（需 admin）、`/configs`（需 admin）、`/system/backup*`、`/system/health-check`、`/system/panel-log`、`/system/processes`、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/open/*`（App Key 开放接口）、`/mcp/*`。
+
+## 实测补充（面板 v3.4.5 / operator 账号）
+
+- `POST /tasks` 返回 **201**，体是 `{data: {...}}`（不是 200，也不是裸对象）。
+- 任务命令只接受托管命令（`task xxx.js` 等）；裸 shell（`echo`）会写入失败日志：
+  `[执行错误: 找不到托管依赖命令 echo，请先在依赖页面安装对应 Python/Node 依赖，或改用脚本文件命令]`。
+- 订阅的 `type` 是 `git-repo`，上次同步时间是 `last_pull_at`。
+- viewer 访问 `/envs`、`/subscriptions`、`/scripts/tree` 及所有写操作 → `403 权限不足`；
+  `/notifications`、`/configs` 对 operator 也是 `403 需要管理员权限`。
+- `POST /auth/refresh` 只回 `access_token`，**不轮换** refresh token。
