@@ -14,7 +14,7 @@ final class UserListViewModel: ObservableObject {
             let loaded = try await client.fetchUsers()
             users = loaded.sorted { lhs, rhs in
                 if lhs.roleValue != rhs.roleValue {
-                    let order: [PanelRole] = [.admin, .operator, .viewer]
+                    let order: [PanelRole] = [.admin, .ops, .viewer]
                     let left = order.firstIndex(of: lhs.roleValue) ?? 9
                     let right = order.firstIndex(of: rhs.roleValue) ?? 9
                     if left != right { return left < right }

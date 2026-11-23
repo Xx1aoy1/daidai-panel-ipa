@@ -7,7 +7,7 @@ struct UserCreateView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var confirmPassword = ""
-    @State private var role: PanelRole = .operator
+    @State private var role: PanelRole = .ops
     @State private var isCreating = false
     @State private var errorText: String?
 

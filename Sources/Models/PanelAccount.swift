@@ -38,7 +38,8 @@ struct PanelAccount: Decodable, Identifiable, Equatable {
 
 enum PanelRole: String, CaseIterable, Identifiable {
     case admin
-    case operator
+    /// `operator` 是 Swift 关键字，case 名必须换一个，rawValue 保持面板的值。
+    case ops = "operator"
     case viewer
 
     var id: String { rawValue }
@@ -46,7 +47,7 @@ enum PanelRole: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .admin: return "管理员"
-        case .operator: return "运维"
+        case .ops: return "运维"
         case .viewer: return "只读"
         }
     }
@@ -54,7 +55,7 @@ enum PanelRole: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .admin: return "全部权限，含系统设置、通知、依赖、备份、用户管理"
-        case .operator: return "可读写任务、变量、订阅、脚本；管理类接口 403"
+        case .ops: return "可读写任务、变量、订阅、脚本；管理类接口 403"
         case .viewer: return "只能看任务与日志，写操作与变量/脚本/订阅均 403"
         }
     }
@@ -62,7 +63,7 @@ enum PanelRole: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .admin: return "crown.fill"
-        case .operator: return "wrench.and.screwdriver.fill"
+        case .ops: return "wrench.and.screwdriver.fill"
         case .viewer: return "eye.fill"
         }
     }
