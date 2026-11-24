@@ -98,7 +98,7 @@ struct PasskeyView: View {
                         EmptyStateView(icon: "key.slash",
                                        title: "还没有通行密钥",
                                        message: "添加要在浏览器里完成（WebAuthn 只支持网页端），加完这里就能看到并管理。")
-                        if let url = session.currentServer?.url {
+                        if let server = session.currentServer, let url = URL(string: server.baseURL) {
                             Link(destination: url) {
                                 Label("在浏览器打开面板添加", systemImage: "safari")
                                     .font(.system(size: 12, weight: .medium))
