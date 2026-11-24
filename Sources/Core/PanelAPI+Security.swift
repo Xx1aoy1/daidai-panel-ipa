@@ -125,6 +125,47 @@ extension APIClient {
                                   json: ["code": code])
         return (try? Self.decoder.decode(MessagePayload.self, from: data))?.message
     }
+
+    // MARK: - 安全审计（admin）
+
+    /// `GET /security/audit-logs?page=&page_size=&action=`。
+    ///
+    /// - `action` 是**精确匹配**（`Where("action = ?")`），传空等于不过滤；
+    /// - `page_size` 上限 100，越界由面板回落成 20，这里固定 30。
+    func fetchAuditLogs(page: Int = 1,
+                        pageSize: Int = 30,
+                        action: SecurityAuditAction? = nil) async throws -> PagedResult<SecurityAuditEntry> {
+        var query = ["page": "\(max(page, 1))", "page_size": "\(min(max(pageSize, 1), 100))"]
+        if let action { query["action"] = action.rawValue }
+        return try await list("/security/audit-logs", query: query)
+    }
+
+    // MARK: - 通行密钥（只作用于自己的账号）
+
+    /// `GET /security/passkeys`：只列当前登录用户的，任何角色都能调。
+    /// 只能看/改/删，**不能在这里新增**：注册要跑 WebAuthn，面板只做了网页端。
+    func fetchPasskeys() async throws -> [PasskeyEntry] {
+        let data = try await send(path: "/security/passkeys")
+        if let envelope = try? Self.decoder.decode(SecurityListEnvelope<PasskeyEntry>.self, from: data) {
+            return envelope.data ?? []
+        }
+        return try Self.decoder.decode([PasskeyEntry].self, from: data)
+    }
+
+    /// `PUT /security/passkeys/:id {name}`：名称会 trim 并截到 64 字，空名由面板回落成「通行密钥」。
+    /// 不是自己的与不存在同样回 404，不透露别人的通行密钥是否存在。
+    func renamePasskey(id: Int, name: String) async throws -> String? {
+        let data = try await send(path: "/security/passkeys/\(id)",
+                                  method: "PUT",
+                                  json: ["name": name.trimmingCharacters(in: .whitespacesAndNewlines)])
+        return (try? Self.decoder.decode(MessagePayload.self, from: data))?.message
+    }
+
+    /// `DELETE /security/passkeys/:id`：删掉自己的一枚通行密钥，不可恢复（要重新在网页端注册）。
+    func deletePasskey(id: Int) async throws -> String? {
+        let data = try await send(path: "/security/passkeys/\(id)", method: "DELETE")
+        return (try? Self.decoder.decode(MessagePayload.self, from: data))?.message
+    }
 }
 
 /// 安全类列表接口的 `data` 允许为 null（白名单 / 会话为空时），单独兜一层。

@@ -6,10 +6,12 @@ final class SecurityCenterViewModel: ObservableObject {
     @Published var stats: LoginStats?
     @Published var sessionCount: Int?
     @Published var whitelistCount: Int?
+    @Published var passkeyCount: Int?
+    @Published var auditTotal: Int?
     @Published var errorText: String?
     @Published var isLoading = false
 
-    /// 四个接口逐个 try：任何一个 403 / 超时都不该把整页拖成空白。
+    /// 各接口逐个 try：任何一个 403 / 超时都不该把整页拖成空白。
     func load(client: APIClient, isAdmin: Bool) async {
         if twoFAEnabled == nil { isLoading = true }
         errorText = nil
@@ -17,6 +19,13 @@ final class SecurityCenterViewModel: ObservableObject {
         do {
             let status = try await client.fetchTwoFactorStatus()
             twoFAEnabled = status.isEnabled
+        } catch {
+            if !isAdmin { errorText = (error as? PanelError)?.message ?? error.localizedDescription }
+        }
+
+        // 通行密钥任何角色都能管自己的，所以放在 admin 判断之前。
+        do {
+            passkeyCount = try await client.fetchPasskeys().count
         } catch {
             if !isAdmin { errorText = (error as? PanelError)?.message ?? error.localizedDescription }
         }
@@ -39,6 +48,11 @@ final class SecurityCenterViewModel: ObservableObject {
         }
         do {
             whitelistCount = try await client.fetchIPWhitelist().count
+        } catch {
+            failures.append(message(of: error))
+        }
+        do {
+            auditTotal = try await client.fetchAuditLogs(page: 1, pageSize: 1).total
         } catch {
             failures.append(message(of: error))
         }
@@ -102,10 +116,17 @@ struct SecurityCenterView: View {
                         detail: twoFAText,
                         badge: model.twoFAEnabled == true ? ("已启用", AppTheme.success) : ("未启用", AppTheme.idle))
                 }
+                NavigationLink(destination: PasskeyView()) {
+                    row(title: "通行密钥",
+                        icon: "key.fill",
+                        tint: AppTheme.accent,
+                        detail: passkeyText,
+                        badge: passkeyBadge)
+                }
             } header: {
                 Text("我的账号")
             } footer: {
-                Text("两步验证只作用于当前登录的账号，任何角色都能自己开；开启后登录要多输一次认证器里的 6 位动态码。")
+                Text("两步验证和通行密钥都只作用于当前登录的账号，任何角色都能自己管；通行密钥只能在网页端添加，APP 里可以查看、改名、删除。")
                     .font(.system(size: 11))
             }
 
@@ -132,19 +153,27 @@ struct SecurityCenterView: View {
                             detail: whitelistText,
                             badge: (model.whitelistCount ?? 0) > 0 ? ("限制中", AppTheme.failure) : ("不限制", AppTheme.idle))
                     }
+                    NavigationLink(destination: AuditLogListView()) {
+                        row(title: "审计日志",
+                            icon: "checklist.checked",
+                            tint: AppTheme.idle,
+                            detail: model.auditTotal.map { "共 \($0) 条敏感操作记录" } ?? "查看敏感操作记录",
+                            badge: nil)
+                    }
                 } else {
                     lockedRow("登录日志", icon: "list.bullet.rectangle.portrait.fill")
                     lockedRow("活动会话", icon: "rectangle.stack.person.crop.fill")
                     lockedRow("IP 白名单", icon: "network.badge.shield.half.filled")
+                    lockedRow("审计日志", icon: "checklist.checked")
                 }
             } header: {
                 Text("管理员")
             } footer: {
                 if !isAdmin {
-                    Text("登录日志、活动会话、IP 白名单这三组接口面板只对管理员开放，当前账号调用会 403，所以这里不开放入口。")
+                    Text("登录日志、活动会话、IP 白名单、审计日志这四组接口面板只对管理员开放，当前账号调用会 403，所以这里不开放入口。")
                         .font(.system(size: 11))
                 } else {
-                    Text("活动会话能看到所有人的登录，包括网页端；IP 白名单一旦非空就立刻生效，加之前先确认你自己的出口 IP 在列表里。")
+                    Text("活动会话能看到所有人的登录，包括网页端；IP 白名单一旦非空就立刻生效，加之前先确认你自己的出口 IP 在列表里。审计日志只记成功的敏感操作。")
                         .font(.system(size: 11))
                 }
             }
@@ -181,6 +210,16 @@ struct SecurityCenterView: View {
     private var whitelistText: String {
         guard let count = model.whitelistCount else { return "登录来源限制" }
         return count == 0 ? "空列表：不限制来源" : "\(count) 条，仅列表内可登录"
+    }
+
+    private var passkeyText: String {
+        guard let count = model.passkeyCount else { return "指纹 / 面容快速登录" }
+        return count == 0 ? "未添加，需在网页端添加" : "\(count) 枚，可免动态码登录"
+    }
+
+    private var passkeyBadge: (String, Color)? {
+        guard let count = model.passkeyCount, count > 0 else { return nil }
+        return ("\(count) 枚", AppTheme.success)
     }
 
     private func row(title: String,

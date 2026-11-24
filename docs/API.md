@@ -326,6 +326,10 @@ registered   false 表示面板内部键，设置页不该展示
 | POST | `/security/2fa/setup` | — | `{data:{secret, uri}}`，**不改变启用状态** |
 | POST | `/security/2fa/verify` | `{code}` | `{message:"2FA 已启用"}` |
 | DELETE | `/security/2fa` | `{code}`（**必填**） | `{message:"2FA 已禁用"}` |
+| GET | `/security/audit-logs` | `page`、`page_size`（≤100，越界回落 20）、`action`（**精确匹配**） | 分页 `{data, total, page, page_size}` |
+| GET | `/security/passkeys` | — | `{data:[{id, name, rp_id, origin, created_at, last_used_at, backup_state}]}` |
+| PUT | `/security/passkeys/:id` | `{name}` | `{message:"已重命名"}`；不是自己的回 **404** |
+| DELETE | `/security/passkeys/:id` | — | `{message:"已删除"}`；不是自己的回 **404** |
 
 关键约束（全部实测）：
 
@@ -352,10 +356,23 @@ registered   false 表示面板内部键，设置页不该展示
 - 面板**不提供备用恢复码**；丢了认证器要靠另一个 admin 账号处理（重置密码不会关 2FA）。
 - `POST /auth/login` 有频率限制：短时间连续失败会回 **429「请求过于频繁，请稍后再试」**（不锁账号，等几分钟自动恢复），
   与 `code=account_locked` 的 429（带 `remaining_seconds`）不是一回事。
+- **审计日志只记成功的操作**（`recordAudit` 在业务成功后调用），失败不写；筛选只有 `action` 精确匹配，
+  没有时间范围 / 操作者 / IP 过滤。`action` 是稳定英文标识（`server/service/login_security.go` 的 `Audit*` 常量，
+  共 31 个：`password.change`、`2fa.enable`、`passkey.delete`、`user.*`、`backup.*`、`console.run`、`config.*`、
+  `open_app.*`、`ip_whitelist.*`、`login_logs.clear`、`ssh_key.*`、`system.*`、`process.kill`），
+  客户端没收录的标识要原样显示。`detail` 是人话（「删除白名单 192.168.0.0/24」），命令类截到前 200 字。
+  开放 API 的操作者 `username` 形如 `应用:名称（app_key）`。
+- **通行密钥是网页端专属**：面板源码注释与网页卡片都写明「APP 端暂不支持通行密钥」。注册要跑完整 WebAuthn
+  （浏览器系统验证 + attestation），且凭据绑定添加时的**完整来源**（scheme + 主机 + 端口），
+  内网 IP 访问拿不到合法 RP ID，也无法托管 `apple-app-site-association`，所以客户端只做列表 / 重命名 / 删除。
+- 通行密钥登录**跳过两步验证**（它就是「免密 + 免动态码」的登录方式），删除前要确认自己还记得密码。
+- 改密码 / 重置密码会 `SetPasswordAndClearPasskeys` **清空该用户全部通行密钥**（与改密即撤销全部会话同口径）。
+- `PUT /security/passkeys/:id` 的名称会 trim 并截到 64 字，空名回落成「通行密钥」；
+  不是自己的与不存在都回 **404**（不透露别人的凭据是否存在）。
 
 ### 仍未接入（面板有、客户端暂时没做）
 
-`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/passkeys*`（通行密钥）、`/security/audit-logs`（安全审计）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/passkeys/register/*`（注册要 WebAuthn，网页端专属；列表/改名/删除已接入）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
 
 ## 实测补充（面板 v3.4.5）
 
