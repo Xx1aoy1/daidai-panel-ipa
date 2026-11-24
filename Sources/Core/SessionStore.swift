@@ -178,6 +178,13 @@ final class SessionStore: ObservableObject {
         isLoggedIn = false
     }
 
+    /// 会话在面板侧被撤销（自己点了「撤销当前会话」/「踢该账号」）后调用：
+    /// 先清掉本地登录态，再把提示留给登录页——顺序不能反，`logout` 会把 `sessionMessage` 抹掉。
+    func forceLogout(message: String) async {
+        await logout(remote: false)
+        sessionMessage = message
+    }
+
     func removeServer(_ server: PanelServer) async {
         if currentServer?.id == server.id {
             await logout(remote: true)

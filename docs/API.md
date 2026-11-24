@@ -305,9 +305,57 @@ registered   false 表示面板内部键，设置页不该展示
   密码规则（只用于「设置新密码」，登录不校验）：至少 8 个字符、UTF-8 不超过 **72 字节**（bcrypt 硬限制），
   字母 / 数字 / 符号三类里至少含两类。
 
+#### 安全中心（`/security/*`）
+
+权限分两档：`login-logs` / `sessions*` / `ip-whitelist` / `audit-logs` / `login-stats` 全部 `RequireAdmin()`
+（operator、viewer 回 `403 需要管理员权限`）；`2fa*` 与 `passkeys*` 只作用于**当前登录用户**，任何角色都能调。
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/security/login-logs` | `page`、`page_size`（≤100，越界回落 20）、`username`（**精确匹配**） | 分页 `{data, total, page, page_size}` |
+| DELETE | `/security/login-logs` | — | `{message:"已清除 N 条登录日志"}` |
+| GET | `/security/login-stats` | `days`（1-90，越界回落 7） | `{data:{total_logins, success_logins, failed_logins, active_sessions, locked_accounts, period_days}}` |
+| GET | `/security/sessions` | — | `{data:[{id, user_id, username, client_type, client_type_label, client_name, ip, user_agent, created_at, expires_at, current}]}` |
+| DELETE | `/security/sessions/:id` | — | `{message:"会话已撤销"}`；不存在回 **404「会话不存在」** |
+| DELETE | `/security/sessions/others` | — | `{message:"已撤销 N 个其他会话"}` |
+| DELETE | `/security/sessions/user/:user_id` | — | `{message:"已撤销 N 个会话"}` |
+| GET | `/security/ip-whitelist` | — | `{data:[{id, ip, remarks, created_at}]}` |
+| POST | `/security/ip-whitelist` | `{ip, remarks?}` | **201** + `{message:"添加成功", data:{...}}` |
+| DELETE | `/security/ip-whitelist/:id` | — | `{message:"删除成功"}`（删不存在的 id 也回 200） |
+| GET | `/security/2fa/status` | — | `{data:{enabled: bool}}` |
+| POST | `/security/2fa/setup` | — | `{data:{secret, uri}}`，**不改变启用状态** |
+| POST | `/security/2fa/verify` | `{code}` | `{message:"2FA 已启用"}` |
+| DELETE | `/security/2fa` | `{code}`（**必填**） | `{message:"2FA 已禁用"}` |
+
+关键约束（全部实测）：
+
+- **登录日志只有「用户名精确」一种筛选**，没有时间范围、状态、IP 过滤；`status` 只有 `0` 成功 / `1` 失败。
+  记录里带 `client_type`（`web` / `app`，按 UserAgent 现推）和 `client_name`（登录时客户端报的名字）。
+- **会话列表是全局的**：admin 看到所有人的会话，`current` 按会话号（JWT 的 `sid`）判定，
+  所以行里的 `username` 可能是别人。`expires_at` 是 access 过期时间，refresh 还能续的会话也会列出来。
+- `DELETE /security/sessions/others` 只影响**当前用户自己**（按 token 里的用户名找 user_id），
+  不影响列表里别人的会话；撤销自己当前会话时下一次请求就回 `401 code=session_revoked`。
+- **IP 白名单没有开关**：列表非空即开启，空列表才是不限制（`IsIPWhitelisted` 里 `len==0 → true`）。
+  添加/删除**立即生效**，但只作用于**登录**：不在名单里的 IP 登录回 **403「当前 IP 不在登录白名单中」**，
+  已登录的会话不会被立刻踢掉。撞上这条限制时连 `POST /auth/login` 都过不去，只能去网页端（或用已在线的会话）处理。
+- 白名单格式由服务端 `NormalizeIPWhitelistEntry` 规范化，支持单 IP、CIDR 和 IPv4 通配 `203.0.113.*`；
+  重复添加回 `400「该 IP 或网段已在白名单中」`，非法格式回 `400「IP 地址格式无效」` / `400「IP 段格式无效，请使用 CIDR，例如 203.0.113.0/24」`。
+- **2FA 三步走**：`setup` 只发 `secret` + `otpauth://` 链接（二维码要客户端自己画），
+  然后 `verify` 验码才真正启用；已启用时再调 `setup` 回 `400「两步验证已启用，如需重新绑定请先关闭」`
+  （防止拿一个登录态就把 2FA 悄悄重置掉）。
+- 关闭 2FA **必须带当前动态码**：缺码 `400「请输入当前的动态验证码」`，码错 `400「动态验证码错误」`；
+  未启用时调关闭直接回 `200 {message:"2FA 未启用"}`。
+- TOTP **有防重放**：同一个 6 位码在同一个 30 秒窗口内只能用一次，重复用回 `400「验证码无效」`，
+  登录时则回 `401 code=invalid_totp`。客户端做自动化测试时每个码只能换一次请求。
+- 启用 2FA 后登录：不带码回 `401 code=two_factor_required`（体里同时带 `captcha_*` 与 `two_factor_required`），
+  带码正确才 200。
+- 面板**不提供备用恢复码**；丢了认证器要靠另一个 admin 账号处理（重置密码不会关 2FA）。
+- `POST /auth/login` 有频率限制：短时间连续失败会回 **429「请求过于频繁，请稍后再试」**（不锁账号，等几分钟自动恢复），
+  与 `code=account_locked` 的 429（带 `remaining_seconds`）不是一回事。
+
 ### 仍未接入（面板有、客户端暂时没做）
 
-`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/*`（登录日志、会话踢下线、IP 白名单、2FA 绑定、Passkey）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/passkeys*`（通行密钥）、`/security/audit-logs`（安全审计）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
 
 ## 实测补充（面板 v3.4.5）
 

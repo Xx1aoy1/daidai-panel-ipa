@@ -91,6 +91,17 @@ struct MoreView: View {
                     }
                 }
 
+                Section {
+                    NavigationLink(destination: SecurityCenterView()) {
+                        Label("安全中心", systemImage: "lock.shield.fill")
+                    }
+                } header: {
+                    Text("安全")
+                } footer: {
+                    Text("两步验证任何角色都能自己开；登录日志、活动会话、IP 白名单只有管理员能看。")
+                        .font(.system(size: 11))
+                }
+
                 Section(header: Text("账号")) {
                     if let user = session.user {
                         HStack(spacing: 10) {
