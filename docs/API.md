@@ -102,7 +102,15 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 | GET | `/subscriptions` | 分页，客户端按 `page_size=100` 翻页 |
 | PUT | `/subscriptions/:id/pull` | 触发一次同步 |
 | PUT | `/subscriptions/:id/enable` \| `/disable` | |
-| GET | `/subscriptions/:id/logs` | 拉取日志（客户端暂未使用） |
+| GET | `/subscriptions/:id/logs` | 拉取历史日志（分页；实时输出走下面的 SSE） |
+| GET | `/subscriptions/:id/pull-stream` | **SSE**：正常输出是 `data: 一行`，结束时 `event: done` + `data: finished\|not_running\|reconnect\|timeout\|closed` |
+| PUT | `/subscriptions/:id/pull/stop` | 中止正在跑的拉取；没有在跑时回 400「当前没有进行中的拉取任务」 |
+
+- **必须先 `PUT /pull` 再连 `pull-stream`**：面板只在拉取启动时注册 broadcaster，反过来先连流会立刻收到 `not_running`；
+  拉取无论成败结束都会移除 broadcaster，**事后再连也补不到输出**（只能靠 broadcaster 里的 history 重放，且只对同一次拉取有效）。
+- 同一订阅重复 `PUT /pull` 时，若确实在跑回 400「该订阅正在拉取中」；已经结束时再调会正常启动第二次。
+- 流里 `reconnect` 表示面板关停/请求 ctx 被取消（不是拉取失败），网页与 APP 都会重连一次；
+  `timeout` 是 5 分钟无输出。
 
 ### 脚本
 
@@ -118,6 +126,23 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 | DELETE | `/scripts/run/:run_id` | — | 清除临时运行记录 |
 | GET | `/scripts/versions` | `path=相对路径` | `{data: [{id, script_path, version, message, content_length, created_at}]}`（最多 50 条） |
 | GET | `/scripts/versions/:id` | — | 含 `content` 的完整版本 |
+| PUT | `/scripts/versions/:id/rollback` | — | 写回该版本内容，并**新增**一条 `回滚到 vN` 的版本；返回 `{message, version}`，id 不存在回 404「版本不存在」 |
+| DELETE | `/scripts/versions` | `path=相对路径` | 清空该文件全部历史，`{message, cleared_count}`；路径不存在也回 200（`cleared_count: 0`） |
+| POST | `/scripts/upload` | multipart：字段 `file` 可重复、`dir` 是目标目录 | **201** + `{message, path, paths, uploaded_count}`（**平铺，没有 data 外壳**） |
+| POST | `/scripts/directory` | `{path}` | **201** + `{message}`，自动 `MkdirAll` |
+| PUT | `/scripts/rename` | `{old_path, new_name}` | `{message, new_path}`；`new_name` 只能是叶子名 |
+| PUT | `/scripts/move` | `{source_path, target_dir}` | `{message, new_path}`；`target_dir` 空串/`/` = 脚本根目录 |
+| POST | `/scripts/copy` | `{source_path, target_dir, new_name?}` | **201** + `{message, new_path}`；目录也能整体复制 |
+| DELETE | `/scripts` | `?path=&type=file\|directory` | `{message}`；不存在回 400「文件不存在: x」 |
+| DELETE | `/scripts/batch` | `{paths: [{path, type}]}` | `{message, success_count, failed_count, failed_items}` |
+
+- **上传/复制都是直接覆盖同名文件**，面板不提示、不备份、不自动改名；客户端在上传前自己比对当前目录里的同名文件再让用户确认。
+- `upload` 允许的扩展名是固定白名单（`py/js/mjs/sh/ts/json/yaml/yml/txt/md/conf/ini/env/toml/xml/csv/png/jpg/jpeg/gif/svg/ico/bmp/webp/log/htm/html/css/sql/bat/cmd/ps1/go/so`），
+  单个文件上限 **100MB**，无扩展名的文件放行。不支持的类型回 400「文件 xxx 类型不支持」。
+- 改名/复制的新名字由 `validateScriptLeafName` 校验：空、`/`、`\`、`.`、`..`、`<>:"|?*`、控制字符都拒；
+  另外 `.git` 这类受控名会回 400「名称不可用: .git」。
+- 移动目录到它自己内部回 400「不能将目录移动到自身」。
+- 所有写操作都挂 `RequireRole("operator")`，viewer 回 403「权限不足」。
 
 ### 管理员接口（全部 `RequireAdmin`，operator / viewer 回 403）
 
@@ -150,6 +175,22 @@ User-Agent: DaidaiPanel-iOS/1.0.0 (1)
 
 - `uptime` 是中文人话字符串（「16时33分」），不是秒数。
 - 面板对 `page_size > 100` 静默降级成 20 的毛病在这些接口上不适用（都不是分页）。
+
+#### 后台进程（`/system/processes`，管理员本人）
+
+| 方法 | 路径 | 参数 | 返回 |
+| --- | --- | --- | --- |
+| GET | `/system/processes` | `scope=task`\|`all`（默认 `task`） | `{data: [{pid, pgid, task_id, task_name, cmdline, started_at, rss_bytes, state, start_ticks}], supported, all_supported, scope}` |
+| POST | `/system/processes/kill` | `{pid, start_ticks}` | `{message, exited}`；进程已不在回 **409** |
+
+- 路由组挂的是 `JWTAuth + RequireUserToken + RequireAdmin` —— **应用令牌 / 脚本令牌调不通**，只给管理员本人的登录态。
+- `scope=task` 只列环境里带 `DAIDAI_TASK_ID` 的进程（含已脱离任务组、继续跑的子孙进程）；`scope=all` 连 nginx / sh 一起列。
+- `state` 只有三个值：`running_with_task`（任务还在）/ `detached`（任务结束但进程没死）/ `other`（非任务进程）。
+- `started_at` 的小数秒只有 **2 位**（`2026-11-22T20:25:28.99+08:00`），不像其它接口是 9 位纳秒，解析器要按位数补齐。
+- `start_ticks` 是 `/proc/<pid>/stat` 的原始 starttime，**结束进程必须原样回传**：PID 被复用时面板靠它挡住误杀，对不上回 409。
+- 拒绝结束的三种情况回 400：PID 1、面板自身、与面板同一进程组。
+- `supported=false` 是面板跑在非 Linux 上（读不到 `/proc`）；`all_supported=false` 是 Magisk 模块版不开放「全部进程」。
+- 结束信号先 TERM 后 KILL；`exited=false` 表示信号发出去了但进程还赖着，面板文案是「请稍后刷新查看」。
 
 #### 日志管理（`RequireRole("operator")`）
 
@@ -372,7 +413,7 @@ registered   false 表示面板内部键，设置页不该展示
 
 ### 仍未接入（面板有、客户端暂时没做）
 
-`/scripts/upload|download|rename|move|copy`、`/scripts/versions/:id/rollback`、`/system/panel-log`、`/system/processes`、`/system/config-script`、`/security/passkeys/register/*`（注册要 WebAuthn，网页端专属；列表/改名/删除已接入）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
+`/scripts/download`（把脚本下载到本机）、`/scripts/batch`（批量删除）、`/system/panel-log`、`/system/config-script`、`/system/update*`、`/security/passkeys/register/*`（注册要 WebAuthn，网页端专属；列表/改名/删除已接入）、`/tasks/batch/*`、`/tasks/views`、`/tasks/:id/pin`、`/envs/import|export`、`/deps/:id/log-stream`（SSE，改用轮询）、`/open/*`（App Key 开放接口）、`/mcp/*`。
 
 ## 实测补充（面板 v3.4.5）
 

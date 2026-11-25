@@ -53,7 +53,8 @@ struct ScriptEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if canRun || canFormat {
+                // 历史版本对所有文本文件都该能看，所以这里的条件是「能编辑」而不是「能运行」。
+                if !isLoading && !isBinary {
                     Menu {
                         if canRun {
                             Button {
@@ -119,8 +120,11 @@ struct ScriptEditorView: View {
                 .environmentObject(session)
         }
         .sheet(isPresented: $showVersions) {
-            ScriptVersionListView(path: path, name: name)
-                .environmentObject(session)
+            ScriptVersionListView(path: path, name: name) {
+                // 回滚会把文件内容换掉，编辑器里的旧文本必须跟着刷新，否则一保存又把旧内容写回去了。
+                Task { await reloadAfterRollback() }
+            }
+            .environmentObject(session)
         }
         .task { await load() }
     }
@@ -163,6 +167,22 @@ struct ScriptEditorView: View {
                 }
             }
             isSaving = false
+        }
+    }
+
+    /// 版本回滚后重读文件：内容与「原始值」一起刷新，界面回到「已保存」状态。
+    private func reloadAfterRollback() async {
+        guard let client = session.client else { return }
+        do {
+            let result = try await client.fetchScriptContent(path: path)
+            isBinary = result.binary ?? false
+            content = result.content ?? ""
+            original = content
+            flash("已回滚，内容已刷新")
+        } catch {
+            if !session.handle(error) {
+                errorText = (error as? PanelError)?.message ?? error.localizedDescription
+            }
         }
     }
 

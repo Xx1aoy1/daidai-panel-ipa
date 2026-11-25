@@ -292,6 +292,37 @@ final class APIClient {
         return try await executeLong(request)
     }
 
+    /// 多文件 multipart（脚本上传）。面板的 `/scripts/upload` 认多个同名 `file` 字段，
+    /// 再配一个 `dir` 文本字段指定落盘目录。
+    func uploadMultipartFiles(path: String,
+                              field: String,
+                              files: [(filename: String, mimeType: String, data: Data)],
+                              extraFields: [String: String] = [:]) async throws -> Data {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+
+        for item in files {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(Self.asciiFallbackName(item.filename))\"; filename*=UTF-8''\(Self.percentEncodedName(item.filename))\r\n".utf8))
+            body.append(Data("Content-Type: \(item.mimeType)\r\n\r\n".utf8))
+            body.append(item.data)
+            body.append(Data("\r\n".utf8))
+        }
+
+        for (key, value) in extraFields {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n".utf8))
+            body.append(Data("\(value)\r\n".utf8))
+        }
+
+        body.append(Data("--\(boundary)--\r\n".utf8))
+
+        var request = try makeRequest(path: path, method: "POST", query: [:], json: nil, authorized: true)
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return try await executeLong(request)
+    }
+
     private func executeLong(_ request: URLRequest) async throws -> Data {
         let data: Data
         let response: URLResponse

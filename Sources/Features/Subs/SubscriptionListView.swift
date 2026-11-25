@@ -5,7 +5,6 @@ final class SubscriptionListViewModel: ObservableObject {
     @Published var subs: [PanelSubscription] = []
     @Published var isLoading = false
     @Published var errorText: String?
-    @Published var pullingID: Int?
 
     func load(client: APIClient) async {
         if subs.isEmpty { isLoading = true }
@@ -19,11 +18,12 @@ final class SubscriptionListViewModel: ObservableObject {
     }
 }
 
+/// 订阅列表。点进去就是拉取进度页（进页面会立刻触发一次拉取），
+/// 这样「拉代码」和「看输出」是一条路，不用先点按钮再找日志。
 struct SubscriptionListView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var model = SubscriptionListViewModel()
     @State private var errorText: String?
-    @State private var toast: String?
 
     var body: some View {
         Group {
@@ -54,27 +54,21 @@ struct SubscriptionListView: View {
                     }
                     Section {
                         ForEach(model.subs) { sub in
-                            row(sub)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    Button {
-                                        pull(sub)
-                                    } label: {
-                                        Label("立即拉取", systemImage: "arrow.down.circle")
-                                    }
-                                    .tint(AppTheme.accent)
+                            NavigationLink(destination: SubscriptionPullView(subscription: sub)) {
+                                row(sub)
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    toggle(sub)
+                                } label: {
+                                    Label(sub.isEnabled ? "禁用" : "启用",
+                                          systemImage: sub.isEnabled ? "pause.circle" : "play.circle")
                                 }
-                                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                    Button {
-                                        toggle(sub)
-                                    } label: {
-                                        Label(sub.isEnabled ? "禁用" : "启用",
-                                              systemImage: sub.isEnabled ? "pause.circle" : "play.circle")
-                                    }
-                                    .tint(sub.isEnabled ? AppTheme.warning : AppTheme.success)
-                                }
+                                .tint(sub.isEnabled ? AppTheme.warning : AppTheme.success)
+                            }
                         }
                     } footer: {
-                        Text("左滑「立即拉取」会触发一次同步；拉取进度可在面板网页端查看。")
+                        Text("点进去会自动拉取一次并把面板的实时输出铺出来，可以中途停止；左滑切换启用/禁用。")
                             .font(.system(size: 11))
                     }
                 }
@@ -93,19 +87,6 @@ struct SubscriptionListView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(model.isLoading)
-            }
-        }
-        .overlay(alignment: .bottom) {
-            if let toast {
-                Text(toast)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.78))
-                    .clipShape(Capsule())
-                    .padding(.bottom, 24)
-                    .transition(.opacity)
             }
         }
         .task { await load() }
@@ -141,19 +122,6 @@ struct SubscriptionListView: View {
             }
 
             Spacer(minLength: 0)
-
-            if model.pullingID == sub.id {
-                ProgressView().scaleEffect(0.75)
-            } else {
-                Button {
-                    pull(sub)
-                } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 17))
-                        .foregroundColor(AppTheme.accent)
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.vertical, 3)
     }
@@ -164,24 +132,6 @@ struct SubscriptionListView: View {
             await model.load(client: client)
         } catch {
             model.errorText = (error as? PanelError)?.message ?? error.localizedDescription
-        }
-    }
-
-    private func pull(_ sub: PanelSubscription) {
-        model.pullingID = sub.id
-        errorText = nil
-        Task {
-            do {
-                let client = try session.requireClient()
-                try await client.pullSubscription(id: sub.id)
-                showToast("已触发「\(sub.displayName)」同步")
-                await load()
-            } catch {
-                if !session.handle(error) {
-                    errorText = (error as? PanelError)?.message ?? error.localizedDescription
-                }
-            }
-            model.pullingID = nil
         }
     }
 
@@ -196,14 +146,6 @@ struct SubscriptionListView: View {
                     errorText = (error as? PanelError)?.message ?? error.localizedDescription
                 }
             }
-        }
-    }
-
-    private func showToast(_ text: String) {
-        withAnimation { toast = text }
-        Task {
-            try? await Task.sleep(nanoseconds: 1_800_000_000)
-            withAnimation { toast = nil }
         }
     }
 }

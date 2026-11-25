@@ -161,6 +161,17 @@ extension APIClient {
         _ = try await send(path: "/subscriptions/\(id)/\(enabled ? "enable" : "disable")", method: "PUT")
     }
 
+    /// `PUT /subscriptions/:id/pull/stop`：只对正在跑的拉取有效，否则 400「当前没有进行中的拉取任务」。
+    func stopSubscriptionPull(id: Int) async throws {
+        _ = try await send(path: "/subscriptions/\(id)/pull/stop", method: "PUT")
+    }
+
+    /// 订阅拉取的 SSE 流（`GET /subscriptions/:id/pull-stream`）。
+    /// 面板在流里只发 `data: 一行输出`，结束时补一条 `event: done`。
+    func subscriptionPullStreamRequest(id: Int) throws -> URLRequest {
+        try streamRequest(path: "/subscriptions/\(id)/pull-stream")
+    }
+
     // MARK: - 分页拉全
 
     /// 按 100 条一页翻到底。面板对 `page_size > 100` 的处理是**悄悄降级成 20**，

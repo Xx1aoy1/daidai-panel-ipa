@@ -34,19 +34,20 @@ enum DateParser {
         if let date = isoWithFraction.date(from: text) { return date }
         if let date = isoPlain.date(from: text) { return date }
         // Go 的 time.Time 序列化出来是 9 位纳秒（2026-11-23T19:32:12.433947741+08:00），
-        // ISO8601DateFormatter 对超过 3 位的小数秒不稳，先裁到毫秒再试一次。
-        let shortened = trimFraction(text)
-        if shortened != text, let date = isoWithFraction.date(from: shortened) { return date }
+        // 而 /system/processes 的 started_at 只有 2 位（2026-11-22T20:25:28.99+08:00）。
+        // ISO8601DateFormatter 对非 3 位小数不稳，统一补齐/裁到 3 位再试。
+        let normalized = normalizeFraction(text)
+        if normalized != text, let date = isoWithFraction.date(from: normalized) { return date }
         if text.hasSuffix("Z") { text.removeLast() }
         if let date = plainFormatter.date(from: text) { return date }
         if let date = plainNoSeconds.date(from: text) { return date }
-        let shortenedPlain = trimFraction(text)
+        let shortenedPlain = normalizeFraction(text)
         if shortenedPlain != text, let date = plainFormatter.date(from: shortenedPlain) { return date }
         return nil
     }
 
-    /// 把小数秒部分截到 3 位，其余位数丢掉。没有小数或本来就不超过 3 位时原样返回。
-    private static func trimFraction(_ text: String) -> String {
+    /// 把小数秒统一成 3 位：多了裁掉，少了补 0。没有小数部分时原样返回。
+    private static func normalizeFraction(_ text: String) -> String {
         guard let dot = text.firstIndex(of: ".") else { return text }
         var index = text.index(after: dot)
         var digits = 0
@@ -54,9 +55,17 @@ enum DateParser {
             index = text.index(after: index)
             digits += 1
         }
-        guard digits > 3 else { return text }
-        let keep = text.index(dot, offsetBy: 4)
-        return String(text[text.startIndex..<keep]) + String(text[index...])
+        guard digits > 0 else { return text }
+        let tail = String(text[index...])
+        let fraction = String(text[text.index(after: dot)..<index])
+
+        if digits == 3 { return text }
+        if digits > 3 {
+            let keep = fraction.prefix(3)
+            return String(text[text.startIndex..<dot]) + "." + keep + tail
+        }
+        let padded = fraction + String(repeating: "0", count: 3 - digits)
+        return String(text[text.startIndex..<dot]) + "." + padded + tail
     }
 }
 

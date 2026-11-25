@@ -16,7 +16,7 @@ struct MoreView: View {
                         NavigationLink(destination: SubscriptionListView()) {
                             Label("订阅管理", systemImage: "arrow.triangle.2.circlepath")
                         }
-                        NavigationLink(destination: ScriptBrowserView()) {
+                        NavigationLink(destination: ScriptBrowserRoot()) {
                             Label("脚本文件", systemImage: "folder.fill")
                         }
                     } else {
@@ -38,6 +38,9 @@ struct MoreView: View {
                         NavigationLink(destination: SystemInfoView()) {
                             Label("系统监控", systemImage: "cpu")
                         }
+                        NavigationLink(destination: ProcessListView()) {
+                            Label("后台进程", systemImage: "list.bullet.rectangle.portrait")
+                        }
                         NavigationLink(destination: NotificationListView()) {
                             Label("通知渠道", systemImage: "bell.badge.fill")
                         }
@@ -55,6 +58,7 @@ struct MoreView: View {
                         }
                     } else {
                         adminLockRow("系统监控", icon: "cpu")
+                        adminLockRow("后台进程", icon: "list.bullet.rectangle.portrait")
                         adminLockRow("通知渠道", icon: "bell.badge.fill")
                         adminLockRow("系统设置", icon: "slider.horizontal.3")
                         adminLockRow("依赖管理", icon: "shippingbox.fill")
@@ -65,7 +69,7 @@ struct MoreView: View {
                     Text("管理员")
                 } footer: {
                     if session.user?.isAdmin != true {
-                        Text("系统信息、通知渠道、系统设置、依赖管理、备份恢复与用户管理这几组接口面板只对管理员开放，operator / viewer 调用会 403，所以这里不开放入口。")
+                        Text("系统信息、后台进程、通知渠道、系统设置、依赖管理、备份恢复与用户管理这几组接口面板只对管理员开放，operator / viewer 调用会 403，所以这里不开放入口。")
                             .font(.system(size: 11))
                     }
                 }
