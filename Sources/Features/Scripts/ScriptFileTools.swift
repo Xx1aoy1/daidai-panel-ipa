@@ -63,7 +63,7 @@ struct ScriptNamePrompt: View {
                         onConfirm(name)
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .fontWeight(.semibold)
+                    .font(.system(size: 13, weight: .semibold))
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -209,7 +209,7 @@ struct ScriptCopySheet: View {
                         onConfirm(targetDir, trimmed)
                         presentationMode.wrappedValue.dismiss()
                     }
-                    .fontWeight(.semibold)
+                    .font(.system(size: 13, weight: .semibold))
                 }
             }
         }
